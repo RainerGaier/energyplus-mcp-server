@@ -25,6 +25,7 @@ A Model Context Protocol (MCP) server that provides **35 comprehensive tools** f
 - [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
+- [Cite this work](#cite-this-work)
 - [License](#license)
 
 </details>
@@ -412,6 +413,27 @@ The server auto-detects EnergyPlus installation and uses sensible defaults. Conf
    uv run pytest
    ```
 5. Submit a pull request
+
+## Cite this work
+
+If you use EnergyPlus-MCP in your research or project, please cite:
+
+> Han Li, Yujie Xu, Tianzhen Hong, EnergyPlus-MCP: A model-context-protocol server for ai-driven building energy modeling, SoftwareX, Volume 32, 2025, 102367, ISSN 2352-7110, https://doi.org/10.1016/j.softx.2025.102367.
+
+**BibTeX entry:**
+```bibtex
+@article{li2025energyplus,
+  title={EnergyPlus-MCP: A model-context-protocol server for ai-driven building energy modeling},
+  author={Li, Han and Xu, Yujie and Hong, Tianzhen},
+  journal={SoftwareX},
+  volume={32},
+  pages={102367},
+  year={2025},
+  issn={2352-7110},
+  doi={10.1016/j.softx.2025.102367},
+  url={https://www.sciencedirect.com/science/article/pii/S2352711025003334}
+}
+```
 
 ## License
 
