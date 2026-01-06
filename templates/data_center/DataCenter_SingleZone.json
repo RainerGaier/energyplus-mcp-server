@@ -1,0 +1,261 @@
+{
+  "template_id": "DataCenter_SingleZone",
+  "template_version": "1.0.0",
+  "name": "Single Zone Data Center with CRAC Cooling",
+  "description": "A single-zone data center model with air-cooled IT equipment served by a CRAC (Computer Room Air Conditioning) system. Based on Liebert DSE 125 with pumped refrigerant economizer DX cooling.",
+  "idf_file": "DataCenter_SingleZone.idf",
+  "energyplus_version": "25.2",
+  "source": "EnergyPlus Example Files - 1ZoneDataCenterCRAC_wPumpedDXCoolingCoil.idf",
+  "building_type": "data_center",
+  "hvac_system": "CRAC with DX Cooling",
+
+  "defaults": {
+    "geometry": {
+      "length_m": 15.24,
+      "width_m": 15.24,
+      "height_m": 4.572,
+      "floor_area_m2": 232.26,
+      "volume_m3": 1062.0,
+      "orientation_deg": 0
+    },
+    "it_equipment": {
+      "watts_per_unit": 500,
+      "number_of_units": 100,
+      "total_it_load_kw": 50,
+      "design_pue": 1.4,
+      "environmental_class": "A3",
+      "design_inlet_temp_c": 15
+    },
+    "hvac": {
+      "cooling_capacity_kw": 148.3,
+      "supply_air_flow_m3s": 8.5,
+      "cooling_cop": 4.57,
+      "fan_efficiency": 0.7,
+      "fan_pressure_rise_pa": 486
+    },
+    "setpoints": {
+      "cooling_setpoint_c": 29.3,
+      "heating_setpoint_c": 15.0,
+      "supply_air_temp_c": 10.0
+    },
+    "location": {
+      "city": "Denver",
+      "state": "CO",
+      "country": "USA",
+      "latitude": 39.74,
+      "longitude": -105.18,
+      "timezone": -7,
+      "elevation_m": 1793
+    }
+  },
+
+  "parameters": {
+    "geometry": {
+      "length_m": {
+        "type": "float",
+        "min": 5.0,
+        "max": 100.0,
+        "unit": "m",
+        "description": "Building length (X dimension)",
+        "idf_locations": [
+          {"object": "BuildingSurface:Detailed", "field": "vertices", "notes": "Multiple surfaces affected"}
+        ]
+      },
+      "width_m": {
+        "type": "float",
+        "min": 5.0,
+        "max": 100.0,
+        "unit": "m",
+        "description": "Building width (Y dimension)",
+        "idf_locations": [
+          {"object": "BuildingSurface:Detailed", "field": "vertices", "notes": "Multiple surfaces affected"}
+        ]
+      },
+      "height_m": {
+        "type": "float",
+        "min": 3.0,
+        "max": 10.0,
+        "unit": "m",
+        "description": "Building height (Z dimension)",
+        "idf_locations": [
+          {"object": "BuildingSurface:Detailed", "field": "vertices", "notes": "Wall and roof Z coordinates"}
+        ]
+      },
+      "orientation_deg": {
+        "type": "float",
+        "min": 0,
+        "max": 360,
+        "unit": "degrees",
+        "description": "Building rotation from north",
+        "idf_locations": [
+          {"object": "Building", "field": "North Axis"}
+        ]
+      }
+    },
+    "it_equipment": {
+      "watts_per_unit": {
+        "type": "float",
+        "min": 100,
+        "max": 5000,
+        "unit": "W",
+        "description": "Power consumption per IT unit (server rack)",
+        "idf_locations": [
+          {"object": "ElectricEquipment:ITE:AirCooled", "field": "Watts per Unit"}
+        ]
+      },
+      "number_of_units": {
+        "type": "integer",
+        "min": 1,
+        "max": 1000,
+        "unit": "count",
+        "description": "Number of IT units (server racks)",
+        "idf_locations": [
+          {"object": "ElectricEquipment:ITE:AirCooled", "field": "Number of Units"}
+        ]
+      },
+      "environmental_class": {
+        "type": "choice",
+        "options": ["A1", "A2", "A3", "A4", "B", "C"],
+        "description": "ASHRAE environmental class for IT equipment",
+        "idf_locations": [
+          {"object": "ElectricEquipment:ITE:AirCooled", "field": "Environmental Class"}
+        ]
+      }
+    },
+    "hvac": {
+      "cooling_capacity_kw": {
+        "type": "float",
+        "min": 10,
+        "max": 1000,
+        "unit": "kW",
+        "description": "Gross rated cooling capacity of CRAC unit",
+        "idf_locations": [
+          {"object": "Coil:Cooling:DX:SingleSpeed", "field": "Gross Rated Total Cooling Capacity"}
+        ],
+        "notes": "Value in IDF is in Watts"
+      },
+      "supply_air_flow_m3s": {
+        "type": "float",
+        "min": 0.5,
+        "max": 50,
+        "unit": "m3/s",
+        "description": "Design supply air flow rate",
+        "idf_locations": [
+          {"object": "AirLoopHVAC", "field": "Design Supply Air Flow Rate"},
+          {"object": "Coil:Cooling:DX:SingleSpeed", "field": "Rated Air Flow Rate"},
+          {"object": "Fan:VariableVolume", "field": "Maximum Flow Rate"},
+          {"object": "AirTerminal:SingleDuct:VAV:NoReheat", "field": "Maximum Air Flow Rate"}
+        ]
+      }
+    },
+    "setpoints": {
+      "cooling_setpoint_c": {
+        "type": "float",
+        "min": 18,
+        "max": 35,
+        "unit": "C",
+        "description": "Zone cooling setpoint (return air temperature)",
+        "idf_locations": [
+          {"object": "Schedule:Compact", "name": "Cooling Return Air Setpoint Schedule", "field": "value"}
+        ]
+      },
+      "heating_setpoint_c": {
+        "type": "float",
+        "min": 10,
+        "max": 25,
+        "unit": "C",
+        "description": "Zone heating setpoint",
+        "idf_locations": [
+          {"object": "Schedule:Compact", "name": "Heating Setpoint Schedule", "field": "value"}
+        ]
+      }
+    },
+    "location": {
+      "latitude": {
+        "type": "float",
+        "min": -90,
+        "max": 90,
+        "unit": "degrees",
+        "description": "Site latitude",
+        "idf_locations": [
+          {"object": "Site:Location", "field": "Latitude"}
+        ]
+      },
+      "longitude": {
+        "type": "float",
+        "min": -180,
+        "max": 180,
+        "unit": "degrees",
+        "description": "Site longitude",
+        "idf_locations": [
+          {"object": "Site:Location", "field": "Longitude"}
+        ]
+      },
+      "timezone": {
+        "type": "float",
+        "min": -12,
+        "max": 14,
+        "unit": "hours",
+        "description": "Time zone offset from UTC",
+        "idf_locations": [
+          {"object": "Site:Location", "field": "Time Zone"}
+        ]
+      },
+      "elevation_m": {
+        "type": "float",
+        "min": -500,
+        "max": 5000,
+        "unit": "m",
+        "description": "Site elevation above sea level",
+        "idf_locations": [
+          {"object": "Site:Location", "field": "Elevation"}
+        ]
+      }
+    }
+  },
+
+  "outputs": {
+    "standard": [
+      "Zone Mean Air Temperature",
+      "Facility Total Electricity Demand Rate",
+      "Cooling Coil Total Cooling Rate",
+      "Cooling Coil Electricity Rate",
+      "Fan Electricity Rate",
+      "ITE CPU Electricity Rate",
+      "ITE Fan Electricity Rate",
+      "ITE UPS Electricity Rate"
+    ],
+    "custom_ems": [
+      {
+        "name": "PUE",
+        "description": "Power Usage Effectiveness (Total Power / IT Power)",
+        "unit": "dimensionless"
+      },
+      {
+        "name": "CRAC SCOP",
+        "description": "Sensible Coefficient of Performance for CRAC system",
+        "unit": "dimensionless"
+      },
+      {
+        "name": "CRAC Net Sensible Capacity",
+        "description": "Net sensible cooling delivered to zone",
+        "unit": "W"
+      }
+    ]
+  },
+
+  "simulation_settings": {
+    "timestep": 6,
+    "run_design_days": true,
+    "run_weather_file": false,
+    "sizing_calculations": false
+  },
+
+  "notes": [
+    "Based on Liebert DSE 125 CRAC system with pumped refrigerant economizer",
+    "IT equipment uses variable CPU loading schedule throughout the year",
+    "PUE and SCOP calculated via EMS (Energy Management System)",
+    "Design days are for Denver, CO - replace with location-appropriate design days",
+    "For weather file simulations, set Run Simulation for Weather File Run Periods to Yes"
+  ]
+}

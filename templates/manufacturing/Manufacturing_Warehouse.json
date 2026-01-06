@@ -1,0 +1,219 @@
+{
+  "template_id": "Manufacturing_Warehouse",
+  "template_version": "1.0.0",
+  "name": "Manufacturing/Warehouse Facility",
+  "description": "A multi-zone warehouse/manufacturing building based on DOE Commercial Reference Building. Features three zones: Bulk Storage (main production/storage area), Fine Storage (climate-controlled storage), and Office. Includes gas unit heaters in storage and packaged single-zone AC in office areas.",
+  "idf_file": "Manufacturing_Warehouse.idf",
+  "energyplus_version": "25.2",
+  "source": "DOE Commercial Reference Building - RefBldgWarehouseNew2004_Chicago.idf",
+  "building_type": "manufacturing",
+  "hvac_system": "Gas Unit Heaters + PSZ-AC",
+
+  "defaults": {
+    "geometry": {
+      "length_m": 100.58,
+      "width_m": 45.72,
+      "height_m": 8.534,
+      "floor_area_m2": 4835,
+      "num_floors": 1,
+      "orientation_deg": 0
+    },
+    "zones": {
+      "bulk_storage": {
+        "floor_area_m2": 3201,
+        "description": "Main warehouse/production area with unit heaters"
+      },
+      "fine_storage": {
+        "floor_area_m2": 1393,
+        "description": "Climate-controlled storage with PSZ-AC"
+      },
+      "office": {
+        "floor_area_m2": 241,
+        "description": "Office space with PSZ-AC"
+      }
+    },
+    "internal_loads": {
+      "lighting_w_per_m2": {
+        "bulk_storage": 9.7,
+        "fine_storage": 15.1,
+        "office": 11.8
+      },
+      "equipment_w_per_m2": {
+        "bulk_storage": 2.56,
+        "fine_storage": 0,
+        "office": 8.1
+      },
+      "occupancy_people": {
+        "office": 5
+      }
+    },
+    "hvac": {
+      "heating_fuel": "natural_gas",
+      "cooling_type": "dx_single_speed",
+      "ventilation_type": "mechanical"
+    },
+    "setpoints": {
+      "heating_setpoint_c": 15.6,
+      "cooling_setpoint_c": 26.7
+    },
+    "location": {
+      "city": "Chicago",
+      "state": "IL",
+      "country": "USA",
+      "latitude": 41.77,
+      "longitude": -87.75,
+      "timezone": -6,
+      "elevation_m": 190
+    }
+  },
+
+  "parameters": {
+    "geometry": {
+      "length_m": {
+        "type": "float",
+        "min": 30.0,
+        "max": 300.0,
+        "unit": "m",
+        "description": "Building length (Y dimension)",
+        "notes": "Affects all zones proportionally"
+      },
+      "width_m": {
+        "type": "float",
+        "min": 20.0,
+        "max": 150.0,
+        "unit": "m",
+        "description": "Building width (X dimension)"
+      },
+      "height_m": {
+        "type": "float",
+        "min": 4.0,
+        "max": 15.0,
+        "unit": "m",
+        "description": "Clear height to roof deck"
+      },
+      "orientation_deg": {
+        "type": "float",
+        "min": 0,
+        "max": 360,
+        "unit": "degrees",
+        "description": "Building rotation from north",
+        "idf_locations": [
+          {"object": "Building", "field": "North Axis"}
+        ]
+      }
+    },
+    "manufacturing": {
+      "process_load_kw": {
+        "type": "float",
+        "min": 0,
+        "max": 1000,
+        "unit": "kW",
+        "description": "Additional process equipment load in bulk storage",
+        "notes": "Added to ElectricEquipment in BulkStorage zone"
+      },
+      "process_heat_fraction": {
+        "type": "float",
+        "min": 0,
+        "max": 1.0,
+        "unit": "fraction",
+        "description": "Fraction of process load that becomes heat gain",
+        "default": 0.5
+      },
+      "occupancy_count": {
+        "type": "integer",
+        "min": 0,
+        "max": 500,
+        "unit": "people",
+        "description": "Total number of workers in facility"
+      }
+    },
+    "setpoints": {
+      "heating_setpoint_c": {
+        "type": "float",
+        "min": 10,
+        "max": 22,
+        "unit": "C",
+        "description": "Heating setpoint for occupied hours"
+      },
+      "cooling_setpoint_c": {
+        "type": "float",
+        "min": 22,
+        "max": 32,
+        "unit": "C",
+        "description": "Cooling setpoint for occupied hours"
+      }
+    },
+    "location": {
+      "latitude": {
+        "type": "float",
+        "min": -90,
+        "max": 90,
+        "unit": "degrees",
+        "description": "Site latitude"
+      },
+      "longitude": {
+        "type": "float",
+        "min": -180,
+        "max": 180,
+        "unit": "degrees",
+        "description": "Site longitude"
+      },
+      "timezone": {
+        "type": "float",
+        "min": -12,
+        "max": 14,
+        "unit": "hours",
+        "description": "Time zone offset from UTC"
+      },
+      "elevation_m": {
+        "type": "float",
+        "min": -500,
+        "max": 5000,
+        "unit": "m",
+        "description": "Site elevation above sea level"
+      }
+    }
+  },
+
+  "outputs": {
+    "standard": [
+      "Zone Mean Air Temperature",
+      "Zone Air System Sensible Heating Rate",
+      "Zone Air System Sensible Cooling Rate",
+      "Facility Total Electric Demand Power",
+      "Facility Total HVAC Electric Demand Power",
+      "Gas:Facility",
+      "Electricity:Facility"
+    ],
+    "zone_specific": [
+      "BulkStorage Zone Mean Air Temperature",
+      "FineStorage Zone Mean Air Temperature",
+      "Office Zone Mean Air Temperature"
+    ]
+  },
+
+  "simulation_settings": {
+    "timestep": 4,
+    "run_design_days": true,
+    "run_weather_file": false,
+    "sizing_calculations": true
+  },
+
+  "notes": [
+    "Based on DOE Commercial Reference Building for Warehouse (New Construction 2004)",
+    "Three zones: BulkStorage (66%), FineStorage (29%), Office (5%)",
+    "Bulk Storage uses gas unit heaters for heating only",
+    "Fine Storage and Office have PSZ-AC systems (DX cooling + gas heating)",
+    "Metal building construction (walls and roof)",
+    "Slab-on-grade floor",
+    "To add manufacturing process loads, use the process_load_kw parameter"
+  ],
+
+  "use_cases": [
+    "Light manufacturing facilities",
+    "Distribution centers",
+    "Warehouses with office space",
+    "Assembly plants",
+    "Storage facilities with climate control requirements"
+  ]
+}

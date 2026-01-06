@@ -16,7 +16,10 @@ dependencies = [
     "networkx",
     "pandas",
     "plotly",
-    "graphviz"
+    "graphviz",
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic>=2.0"
 ]
 license = {text = "BSD-3-Clause-LBNL"}
 keywords = ["EnergyPlus", "MCP", "server"]

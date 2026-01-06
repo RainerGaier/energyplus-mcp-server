@@ -1,0 +1,330 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://energyplus-mcp.example.com/schemas/building_specification.json",
+  "title": "Building Specification",
+  "description": "Input schema for building energy simulation requests from the orchestrator",
+  "type": "object",
+  "required": ["location", "building_type"],
+
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Unique identifier for the project/site from the orchestrator"
+    },
+    "project_name": {
+      "type": "string",
+      "description": "Human-readable project name"
+    },
+
+    "location": {
+      "type": "object",
+      "description": "Site location from site selection phase",
+      "required": ["latitude", "longitude"],
+      "properties": {
+        "latitude": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90,
+          "description": "Site latitude in decimal degrees (positive = North)"
+        },
+        "longitude": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180,
+          "description": "Site longitude in decimal degrees (positive = East)"
+        },
+        "elevation_m": {
+          "type": "number",
+          "minimum": -500,
+          "maximum": 9000,
+          "description": "Site elevation in meters above sea level (optional, derived from weather if not provided)"
+        },
+        "site_name": {
+          "type": "string",
+          "description": "Location name for identification"
+        },
+        "catchment_area": {
+          "type": "string",
+          "description": "Catchment area identifier (e.g., 'Cam and Ely Ouse')"
+        }
+      }
+    },
+
+    "building_type": {
+      "type": "string",
+      "enum": ["data_center", "manufacturing", "warehouse", "office", "mixed_use"],
+      "description": "Primary building type/use"
+    },
+
+    "geometry": {
+      "type": "object",
+      "description": "Building geometry parameters (optional - uses template defaults if not specified)",
+      "properties": {
+        "floor_area_m2": {
+          "type": "number",
+          "minimum": 50,
+          "maximum": 100000,
+          "description": "Total floor area in square meters"
+        },
+        "length_m": {
+          "type": "number",
+          "minimum": 5,
+          "maximum": 500,
+          "description": "Building length (X dimension) in meters"
+        },
+        "width_m": {
+          "type": "number",
+          "minimum": 5,
+          "maximum": 500,
+          "description": "Building width (Y dimension) in meters"
+        },
+        "height_m": {
+          "type": "number",
+          "minimum": 2.5,
+          "maximum": 50,
+          "description": "Building height (floor to ceiling) in meters"
+        },
+        "num_floors": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Number of floors/stories"
+        },
+        "orientation_deg": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 360,
+          "description": "Building rotation from north in degrees"
+        }
+      }
+    },
+
+    "data_center": {
+      "type": "object",
+      "description": "Data center specific parameters (required when building_type is 'data_center')",
+      "properties": {
+        "it_load_kw": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 100000,
+          "description": "Total IT equipment load in kilowatts"
+        },
+        "target_pue": {
+          "type": "number",
+          "minimum": 1.0,
+          "maximum": 3.0,
+          "description": "Target Power Usage Effectiveness"
+        },
+        "tier_level": {
+          "type": "integer",
+          "enum": [1, 2, 3, 4],
+          "description": "Uptime Institute tier classification"
+        },
+        "cooling_type": {
+          "type": "string",
+          "enum": ["air_cooled", "water_cooled", "evaporative", "free_cooling", "hybrid"],
+          "description": "Primary cooling approach"
+        },
+        "rack_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000,
+          "description": "Number of server racks"
+        },
+        "watts_per_rack": {
+          "type": "number",
+          "minimum": 100,
+          "maximum": 50000,
+          "description": "Average power per rack in watts"
+        }
+      }
+    },
+
+    "manufacturing": {
+      "type": "object",
+      "description": "Manufacturing facility specific parameters",
+      "properties": {
+        "process_type": {
+          "type": "string",
+          "enum": ["light_assembly", "heavy_manufacturing", "food_processing", "pharmaceutical", "electronics", "other"],
+          "description": "Type of manufacturing process"
+        },
+        "process_load_kw": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100000,
+          "description": "Process equipment electrical load in kW"
+        },
+        "process_heat_kw": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100000,
+          "description": "Process heat generation in kW"
+        },
+        "ventilation_ach": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 50,
+          "description": "Required air changes per hour"
+        },
+        "occupant_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000,
+          "description": "Number of occupants during operation"
+        }
+      }
+    },
+
+    "hvac_preferences": {
+      "type": "object",
+      "description": "HVAC system preferences and constraints",
+      "properties": {
+        "system_type": {
+          "type": "string",
+          "enum": ["default", "heat_pump", "chilled_water", "vrf", "evaporative", "hybrid"],
+          "description": "Preferred HVAC system type"
+        },
+        "heating_fuel": {
+          "type": "string",
+          "enum": ["electric", "natural_gas", "district_heating", "heat_pump"],
+          "description": "Heating fuel/source preference"
+        },
+        "cooling_fuel": {
+          "type": "string",
+          "enum": ["electric", "district_cooling", "free_cooling"],
+          "description": "Cooling fuel/source preference"
+        },
+        "renewable_integration": {
+          "type": "boolean",
+          "description": "Whether to consider on-site renewable generation"
+        }
+      }
+    },
+
+    "setpoints": {
+      "type": "object",
+      "description": "Temperature setpoints (optional - uses template defaults if not specified)",
+      "properties": {
+        "cooling_setpoint_c": {
+          "type": "number",
+          "minimum": 15,
+          "maximum": 35,
+          "description": "Cooling setpoint in Celsius"
+        },
+        "heating_setpoint_c": {
+          "type": "number",
+          "minimum": 10,
+          "maximum": 25,
+          "description": "Heating setpoint in Celsius"
+        }
+      }
+    },
+
+    "simulation_options": {
+      "type": "object",
+      "description": "Simulation configuration options",
+      "properties": {
+        "run_annual": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run full annual weather file simulation"
+        },
+        "run_design_days": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run heating and cooling design day simulations"
+        },
+        "sizing_run": {
+          "type": "boolean",
+          "default": false,
+          "description": "Perform HVAC sizing calculations"
+        },
+        "detailed_outputs": {
+          "type": "boolean",
+          "default": false,
+          "description": "Generate detailed hourly outputs"
+        }
+      }
+    },
+
+    "iteration_context": {
+      "type": "object",
+      "description": "Context for design iteration loops",
+      "properties": {
+        "iteration_number": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Current iteration number (1 = initial run)"
+        },
+        "previous_simulation_id": {
+          "type": "string",
+          "description": "Reference to previous simulation for comparison"
+        },
+        "adjustment_type": {
+          "type": "string",
+          "enum": ["initial", "minor_tweak", "major_change", "hvac_redesign", "geometry_change"],
+          "description": "Type of adjustment from previous iteration"
+        },
+        "stakeholder_feedback": {
+          "type": "string",
+          "description": "Summary of stakeholder feedback driving this iteration"
+        }
+      }
+    }
+  },
+
+  "examples": [
+    {
+      "project_id": "site-001-cambridge",
+      "project_name": "Cambridge Data Center",
+      "location": {
+        "latitude": 52.2053,
+        "longitude": 0.1218,
+        "site_name": "Cambridge Manufacturing Site",
+        "catchment_area": "Cam and Ely Ouse"
+      },
+      "building_type": "data_center",
+      "geometry": {
+        "floor_area_m2": 500,
+        "height_m": 4.5
+      },
+      "data_center": {
+        "it_load_kw": 100,
+        "target_pue": 1.4,
+        "cooling_type": "air_cooled",
+        "rack_count": 50,
+        "watts_per_rack": 2000
+      },
+      "simulation_options": {
+        "run_annual": false,
+        "run_design_days": true
+      }
+    },
+    {
+      "project_id": "site-002-fenland",
+      "project_name": "Fenland Manufacturing Facility",
+      "location": {
+        "latitude": 52.4667,
+        "longitude": 0.1500,
+        "site_name": "Fenland Industrial Park",
+        "catchment_area": "Cam and Ely Ouse"
+      },
+      "building_type": "manufacturing",
+      "geometry": {
+        "floor_area_m2": 2000,
+        "height_m": 6.0,
+        "num_floors": 1
+      },
+      "manufacturing": {
+        "process_type": "light_assembly",
+        "process_load_kw": 150,
+        "occupant_count": 50
+      },
+      "hvac_preferences": {
+        "system_type": "heat_pump",
+        "heating_fuel": "heat_pump"
+      }
+    }
+  ]
+}

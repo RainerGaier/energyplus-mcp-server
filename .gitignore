@@ -41,6 +41,10 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+nul
+
+# Local config (contains ngrok URLs, etc.)
+config/
 
 # Logs
 *.log
