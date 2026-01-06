@@ -457,6 +457,8 @@ After fetching the URL, use it in your Config Set node:
 
 ### Option B: Fetch from Local ngrok API (if n8n runs on same machine)
 
+This only works if n8n is running locally on the same machine as ngrok.
+
 Add a node before Config:
 
 - **Node Type:** HTTP Request
@@ -466,33 +468,6 @@ Add a node before Config:
 Then in Config node:
 ```javascript
 {{ $('Get ngrok URL').item.json.tunnels[0].public_url }}
-```
-
-### Option C: Fetch from Server Config Endpoint
-
-The server provides an endpoint that auto-detects the ngrok URL:
-
-- **Node Type:** HTTP Request
-- **Name:** Get API URL
-- **URL:** `http://localhost:8000/api/config/ngrok-url`
-
-**Response:**
-```json
-{
-  "success": true,
-  "ngrok_url": "https://abc123.ngrok-free.app",
-  "source": "ngrok_api"
-}
-```
-
-Then use: `{{ $('Get API URL').item.json.ngrok_url }}`
-
-### Option D: Update URL via POST
-
-When ngrok restarts, update the server's config:
-
-```bash
-curl -X POST "http://localhost:8000/api/config/ngrok-url?url=https://new-url.ngrok-free.app"
 ```
 
 ---
@@ -638,9 +613,8 @@ Optional query parameter: `building_type=data_center` or `building_type=manufact
 
 ### ngrok URL Changed
 
-1. Update the Config node with the new URL
-2. Or use the dynamic URL approach (Option B above)
-3. Or update via POST: `curl -X POST "http://localhost:8000/api/config/ngrok-url?url=NEW_URL"`
+1. Update the Google Sheet with the new URL (if using dynamic URL approach)
+2. Or manually update the Config node with the new URL
 
 ### Workflow Fails at IF Node
 
@@ -654,8 +628,6 @@ Optional query parameter: `building_type=data_center` or `building_type=manufact
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Health check |
-| `/api/config/ngrok-url` | GET | Get current ngrok URL |
-| `/api/config/ngrok-url` | POST | Update ngrok URL |
 | `/api/weather/fetch` | POST | Fetch EPW weather file |
 | `/api/templates` | GET | List building templates |
 | `/api/templates/{id}` | GET | Get template details |
