@@ -28,6 +28,7 @@ from energyplus_mcp_server.energyplus_tools import EnergyPlusManager
 from energyplus_mcp_server.config import get_config
 from energyplus_mcp_server.utils.weather_lookup import WeatherLookup, WeatherLookupError
 from energyplus_mcp_server.utils.template_service import TemplateService, TemplateServiceError
+from energyplus_mcp_server.utils.gdrive_service import GDriveService, GDriveServiceError
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -149,6 +150,12 @@ class SimulationRunRequest(BaseModel):
     design_day: bool = Field(False, description="Run design day only")
     readvars: bool = Field(True, description="Process outputs with ReadVarsESO")
     expandobjects: bool = Field(True, description="Expand HVAC templates")
+
+
+class GDriveExportRequest(BaseModel):
+    """Request to export simulation results to Google Drive"""
+    source_folder: str = Field(..., description="Path to local simulation output folder")
+    destination_folder: str = Field(..., description="Google Drive folder URL or ID")
 
 
 # =============================================================================
@@ -660,6 +667,53 @@ async def list_available_files(
         result = ep_manager.list_available_files(include_example_files, include_weather_data)
         return json.loads(result)
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Google Drive Export Endpoints
+# =============================================================================
+
+@app.post("/api/export/gdrive")
+async def export_to_gdrive(request: GDriveExportRequest):
+    """
+    Export simulation output folder to Google Drive.
+
+    Copies all files from the source folder to a new folder in Google Drive.
+    The new folder name will be the same as the source folder name.
+
+    Requires:
+        - Google Drive API credentials (service account JSON)
+        - Set GOOGLE_DRIVE_CREDENTIALS environment variable
+        - Share destination folder with service account email
+
+    Args:
+        source_folder: Path to local simulation output folder
+        destination_folder: Google Drive folder URL or ID
+
+    Returns:
+        copy_successful: bool - True if all files copied successfully
+        folder_created: str - Name of the created folder
+        folder_id: str - Google Drive ID of the created folder
+        folder_url: str - Web URL to the created folder
+        files_uploaded: int - Number of files uploaded
+        files_failed: int - Number of files that failed to upload
+    """
+    try:
+        gdrive_service = GDriveService()
+
+        result = gdrive_service.upload_folder(
+            source_folder=request.source_folder,
+            destination_folder_url_or_id=request.destination_folder
+        )
+
+        return result
+
+    except GDriveServiceError as e:
+        logger.error(f"Google Drive export error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Unexpected error during Google Drive export: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

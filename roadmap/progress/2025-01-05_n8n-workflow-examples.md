@@ -636,3 +636,65 @@ Optional query parameter: `building_type=data_center` or `building_type=manufact
 | `/api/simulation/results` | GET | Get full results |
 | `/api/simulation/results/summary` | GET | Get condensed summary |
 | `/api/files/read` | GET | Read output file contents |
+| `/api/export/gdrive` | POST | Export results to Google Drive |
+
+---
+
+## Export to Google Drive
+
+After a simulation completes, you can export the results folder to Google Drive.
+
+### Prerequisites
+
+1. Create a Google Cloud project and enable the Google Drive API
+2. Create a service account and download the JSON credentials
+3. Set environment variable: `GOOGLE_DRIVE_CREDENTIALS=/path/to/credentials.json`
+4. Share the destination Google Drive folder with the service account email
+
+### Node: Export to Google Drive
+
+- **Node Type:** HTTP Request
+- **Name:** Export to Google Drive
+
+| Setting | Value |
+|---------|-------|
+| Method | POST |
+| URL | `{{ $('Config').item.json.API_BASE_URL }}/api/export/gdrive` |
+| Body Content Type | JSON |
+
+**Body (JSON):**
+```javascript
+{
+  "source_folder": "{{ $('Run Simulation').item.json.output_directory }}",
+  "destination_folder": "https://drive.google.com/drive/folders/YOUR_FOLDER_ID"
+}
+```
+
+**Expected Response:**
+```json
+{
+  "copy_successful": true,
+  "folder_created": "n8n_Test_Data_Center_20260106_095856_simulation_20260106_095856",
+  "folder_id": "1ABC123xyz",
+  "folder_url": "https://drive.google.com/drive/folders/1ABC123xyz",
+  "files_uploaded": 15,
+  "files_failed": 0,
+  "total_size_bytes": 1234567
+}
+```
+
+### Updated Workflow Structure with Google Drive Export
+
+```
+Manual Trigger
+    → Config (Set node) ← EDIT PARAMETERS HERE BEFORE EACH RUN
+    → Health Check → IF (healthy?)
+        ├─ Yes → Fetch Weather → IF (weather success?)
+        │           ├─ Yes → Generate Model → IF (model success?)
+        │           │           ├─ Yes → Run Simulation → IF (sim success?)
+        │           │           │           ├─ Yes → Get Results → Export to GDrive → End
+        │           │           │           └─ No → Error: Simulation Failed
+        │           │           └─ No → Error: Model Generation Failed
+        │           └─ No → Error: Weather Fetch Failed
+        └─ No → Error: Server Unavailable
+```
