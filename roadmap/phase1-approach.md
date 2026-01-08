@@ -88,6 +88,7 @@ OUTPUT:
 | Standardized building templates | ✅ Working  | DataCenter_SingleZone template with metadata             |
 | Parameterized model generation  | ✅ Working  | TemplateService generates customized IDFs                |
 | Structured report generation    | ⚠️ Basic   | Raw CSV/HTML only                                        |
+| 3D geometry export              | ✅ Working  | IDF → OBJ/glTF via GeomEppy + Trimesh                    |
 | Cloud storage (GCS)             | ❌ Missing  | Needed for deployment                                    |
 | Building specification schema   | ✅ Working  | JSON schema with examples                                |
 | Cross-platform config           | ✅ Working  | Auto-detects platform, env vars supported                |
@@ -109,12 +110,32 @@ OUTPUT:
 - [x] Define default parameters for deterministic first runs
 - [ ] Add additional templates (Warehouse_Manufacturing, Office_Small)
 
-### Milestone 3: Reporting
+### Milestone 3: 3D Visualization Export ✅ Complete
+
+- [x] Implement IDF → OBJ geometry extraction (GeomEppy)
+- [x] Implement OBJ → glTF conversion (Trimesh)
+- [x] Add `/api/export/3d` HTTP endpoint
+- [x] Support Blender-compatible formats for BIM visualization
+
+### Milestone 4: File Download API ✅ Complete
+
+- [x] Add `/api/files/download` endpoint for binary file downloads
+- [x] Add `/api/files/list` endpoint to list folder contents
+- [x] Enable n8n workflows to download files and upload to Google Drive (via Rob's OAuth)
+
+### Milestone 5: Supabase Storage Export ✅ Complete
+
+- [x] Add Supabase storage service for uploading simulation files
+- [x] Add `/api/export/supabase` HTTP endpoint
+- [x] Support folder creation and file replacement in bucket
+- [x] Return bucket name and folder path on success
+
+### Milestone 6: Reporting
 
 - [ ] Design structured technical report format
 - [ ] Implement report generation from simulation results
 
-### Milestone 4: Integration
+### Milestone 7: Integration
 
 - [ ] Define API/interface for receiving inputs from orchestrator
 - [ ] Implement GCS integration for file storage

@@ -19,8 +19,14 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+# Load .env file from project root
+load_dotenv(Path(__file__).parent.parent / ".env")
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 # Import our existing components
@@ -29,6 +35,8 @@ from energyplus_mcp_server.config import get_config
 from energyplus_mcp_server.utils.weather_lookup import WeatherLookup, WeatherLookupError
 from energyplus_mcp_server.utils.template_service import TemplateService, TemplateServiceError
 from energyplus_mcp_server.utils.gdrive_service import GDriveService, GDriveServiceError
+from energyplus_mcp_server.utils.geometry_export import GeometryExportService, GeometryExportError
+from energyplus_mcp_server.utils.supabase_service import SupabaseStorageService, SupabaseServiceError
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -156,6 +164,15 @@ class GDriveExportRequest(BaseModel):
     """Request to export simulation results to Google Drive"""
     source_folder: str = Field(..., description="Path to local simulation output folder")
     destination_folder: str = Field(..., description="Google Drive folder URL or ID")
+
+
+class SupabaseExportRequest(BaseModel):
+    """Request to export simulation results to Supabase storage"""
+    source_folder: str = Field(..., description="Path to local simulation output folder")
+    destination_folder: Optional[str] = Field(
+        None,
+        description="Folder name in Supabase bucket (default: source folder name)"
+    )
 
 
 # =============================================================================
@@ -613,6 +630,114 @@ async def read_output_file(file_path: str, max_lines: int = 1000):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/files/download")
+async def download_file(file_path: str):
+    """
+    Download a file from the outputs directory.
+
+    Returns the file as a binary download, suitable for n8n workflows
+    to upload to Google Drive or other storage services.
+
+    Args:
+        file_path: Full path to the file to download
+
+    Returns:
+        Binary file response with appropriate content type
+    """
+    try:
+        path = Path(file_path)
+
+        if not path.exists():
+            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+
+        # Security: only allow downloading from outputs directory
+        outputs_dir = Path(config.paths.output_dir).resolve()
+        if not str(path.resolve()).startswith(str(outputs_dir)):
+            raise HTTPException(status_code=403, detail="Access denied: can only download files from outputs directory")
+
+        # Determine media type based on extension
+        media_types = {
+            ".csv": "text/csv",
+            ".html": "text/html",
+            ".htm": "text/html",
+            ".json": "application/json",
+            ".idf": "text/plain",
+            ".epw": "text/plain",
+            ".sql": "application/x-sqlite3",
+            ".obj": "model/obj",
+            ".mtl": "text/plain",
+            ".glb": "model/gltf-binary",
+            ".gltf": "model/gltf+json",
+            ".txt": "text/plain",
+            ".err": "text/plain",
+            ".eso": "text/plain",
+            ".eio": "text/plain",
+        }
+        media_type = media_types.get(path.suffix.lower(), "application/octet-stream")
+
+        return FileResponse(
+            path=str(path),
+            filename=path.name,
+            media_type=media_type
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading file: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/files/list")
+async def list_output_files(folder_path: str):
+    """
+    List all files in a simulation output folder.
+
+    Args:
+        folder_path: Path to the output folder
+
+    Returns:
+        List of files with their names, sizes, and download URLs
+    """
+    try:
+        path = Path(folder_path)
+
+        if not path.exists():
+            raise HTTPException(status_code=404, detail=f"Folder not found: {folder_path}")
+
+        if not path.is_dir():
+            raise HTTPException(status_code=400, detail=f"Path is not a directory: {folder_path}")
+
+        # Security: only allow listing from outputs directory
+        outputs_dir = Path(config.paths.output_dir).resolve()
+        if not str(path.resolve()).startswith(str(outputs_dir)):
+            raise HTTPException(status_code=403, detail="Access denied: can only list files from outputs directory")
+
+        files = []
+        for file in path.iterdir():
+            if file.is_file():
+                files.append({
+                    "name": file.name,
+                    "path": str(file),
+                    "size_bytes": file.stat().st_size,
+                    "extension": file.suffix.lower()
+                })
+
+        return {
+            "success": True,
+            "folder_path": folder_path,
+            "folder_name": path.name,
+            "file_count": len(files),
+            "files": sorted(files, key=lambda x: x["name"])
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing files: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # =============================================================================
 # Model Inspection Endpoints
 # =============================================================================
@@ -714,6 +839,145 @@ async def export_to_gdrive(request: GDriveExportRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Unexpected error during Google Drive export: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Supabase Storage Export Endpoints
+# =============================================================================
+
+@app.post("/api/export/supabase")
+async def export_to_supabase(request: SupabaseExportRequest):
+    """
+    Export simulation output folder to Supabase storage bucket.
+
+    Uploads all files from the source folder to a Supabase storage bucket.
+    Creates a folder in the bucket matching the source folder name (or custom name).
+    Replaces any existing files/folders with the same name.
+
+    Requires environment variables:
+        - SUPABASE_URL: Your Supabase project URL
+        - SUPABASE_KEY: Your Supabase service role key
+        - SUPABASE_BUCKET: Target storage bucket name
+
+    Args:
+        source_folder: Path to local simulation output folder
+        destination_folder: Folder name in bucket (optional, defaults to source folder name)
+
+    Returns:
+        - success: bool - True if all files uploaded successfully
+        - supabase_bucket: str - The bucket name
+        - supabase_folder: str - The folder path in the bucket
+        - files_uploaded: int - Number of files uploaded
+        - files_failed: int - Number of files that failed
+        - total_size_bytes: int - Total size of uploaded files
+    """
+    try:
+        supabase_service = SupabaseStorageService()
+
+        result = supabase_service.upload_folder(
+            source_folder=request.source_folder,
+            destination_folder=request.destination_folder,
+            replace_existing=True
+        )
+
+        return result
+
+    except SupabaseServiceError as e:
+        logger.error(f"Supabase export error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Unexpected error during Supabase export: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# 3D Geometry Export Endpoints
+# =============================================================================
+
+class GeometryExportRequest(BaseModel):
+    """Request model for 3D geometry export"""
+    idf_path: str = Field(..., description="Path to the IDF file to export")
+    output_dir: Optional[str] = Field(None, description="Output directory (default: same as IDF)")
+    output_name: Optional[str] = Field(None, description="Base name for output files (default: IDF filename)")
+    formats: Optional[List[str]] = Field(
+        default=["glb"],
+        description="Output formats: 'obj', 'glb', 'gltf'. Default: ['glb']"
+    )
+
+
+@app.post("/api/export/3d")
+async def export_3d_geometry(request: GeometryExportRequest):
+    """
+    Export IDF building geometry to 3D formats for visualization.
+
+    Converts EnergyPlus IDF geometry to Blender-compatible formats:
+    - OBJ (.obj + .mtl) - Wavefront format, widely supported
+    - glTF Binary (.glb) - Modern web-ready format, single file (default)
+    - glTF (.gltf + .bin) - glTF with separate binary
+
+    The exported files can be imported directly into:
+    - Blender (with or without Bonsai addon)
+    - Web-based 3D viewers
+    - Unity, Unreal, and other 3D engines
+
+    Args:
+        idf_path: Path to the IDF file
+        output_dir: Directory for output files (optional)
+        output_name: Base name for output files (optional)
+        formats: List of formats to export (default: ["glb"])
+
+    Returns:
+        - success: bool
+        - exports: Dict of format -> export details
+        - message: Status message
+    """
+    try:
+        geometry_service = GeometryExportService()
+
+        result = geometry_service.export(
+            idf_path=request.idf_path,
+            output_dir=request.output_dir,
+            output_name=request.output_name,
+            formats=request.formats
+        )
+
+        return result
+
+    except GeometryExportError as e:
+        logger.error(f"3D geometry export error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Unexpected error during 3D export: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/geometry/info")
+async def get_geometry_info(idf_path: str):
+    """
+    Get geometry information from an IDF file.
+
+    Returns statistics about the building geometry including:
+    - Number of zones
+    - Number of surfaces
+    - Number of fenestrations (windows/doors)
+    - Zone names
+
+    Args:
+        idf_path: Path to the IDF file
+
+    Returns:
+        Geometry statistics
+    """
+    try:
+        geometry_service = GeometryExportService()
+        return geometry_service.get_geometry_info(idf_path)
+
+    except GeometryExportError as e:
+        logger.error(f"Geometry info error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Unexpected error getting geometry info: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

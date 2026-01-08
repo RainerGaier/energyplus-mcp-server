@@ -1,6 +1,6 @@
 # n8n Workflow Examples for EnergyPlus API
 
-**Date:** 2025-01-05 (Updated: 2025-01-06 - Added parameterization)
+**Date:** 2025-01-05 (Updated: 2025-01-08 - Added Supabase storage export)
 
 **Purpose:** Step-by-step examples for building n8n workflows with the EnergyPlus HTTP API
 
@@ -636,7 +636,12 @@ Optional query parameter: `building_type=data_center` or `building_type=manufact
 | `/api/simulation/results` | GET | Get full results |
 | `/api/simulation/results/summary` | GET | Get condensed summary |
 | `/api/files/read` | GET | Read output file contents |
-| `/api/export/gdrive` | POST | Export results to Google Drive |
+| `/api/files/list` | GET | List files in output folder |
+| `/api/files/download` | GET | Download file as binary |
+| `/api/export/3d` | POST | Export IDF geometry to OBJ/glTF |
+| `/api/geometry/info` | GET | Get geometry info from IDF |
+| `/api/export/gdrive` | POST | Export results to Google Drive (service account) |
+| `/api/export/supabase` | POST | Export results to Supabase storage bucket |
 
 ---
 
@@ -697,4 +702,316 @@ Manual Trigger
         │           │           └─ No → Error: Model Generation Failed
         │           └─ No → Error: Weather Fetch Failed
         └─ No → Error: Server Unavailable
+```
+
+---
+
+## File Download API (for n8n Google Drive Upload via OAuth)
+
+Since service accounts have zero storage quota on personal Google Drive, the recommended approach is to:
+1. Use the API to download files as binary
+2. Use n8n's Google Drive node (with OAuth credentials) to upload
+
+This approach uses your personal Google account's storage quota.
+
+### Node: List Output Files
+
+Get a list of all files in a simulation output folder.
+
+- **Node Type:** HTTP Request
+- **Name:** List Output Files
+
+| Setting | Value |
+|---------|-------|
+| Method | GET |
+| URL | `{{ $('Config').item.json.API_BASE_URL }}/api/files/list` |
+
+**Query Parameters:**
+
+| Name | Value |
+|------|-------|
+| folder_path | `{{ $('Run Simulation').item.json.output_directory }}` |
+
+**Expected Response:**
+```json
+{
+  "success": true,
+  "folder_path": "C:\\...\\outputs\\sim_20260107_...",
+  "folder_name": "sim_20260107_...",
+  "file_count": 19,
+  "files": [
+    {
+      "name": "model.csv",
+      "path": "C:\\...\\outputs\\sim_20260107_...\\model.csv",
+      "size_bytes": 123456,
+      "extension": ".csv"
+    },
+    ...
+  ]
+}
+```
+
+---
+
+### Node: Download File (Binary)
+
+Download a single file as binary data for upload to Google Drive.
+
+- **Node Type:** HTTP Request
+- **Name:** Download File
+
+| Setting | Value |
+|---------|-------|
+| Method | GET |
+| URL | `{{ $('Config').item.json.API_BASE_URL }}/api/files/download` |
+| Response Format | **File** |
+
+**Query Parameters:**
+
+| Name | Value |
+|------|-------|
+| file_path | `{{ $json.path }}` (from the file list item) |
+
+**Important:** Set **Response Format** to "File" to receive binary data that can be uploaded to Google Drive.
+
+---
+
+### Node: Upload to Google Drive (OAuth)
+
+Upload the downloaded file to Google Drive using n8n's native Google Drive node.
+
+- **Node Type:** Google Drive
+- **Operation:** Upload
+- **Credential:** Your Google Drive OAuth2 API credentials (Rob's account)
+
+| Setting | Value |
+|---------|-------|
+| Resource | File |
+| Operation | Upload |
+| Input Data Field Name | `data` |
+| File Name | `{{ $('Download File').item.json.fileName }}` |
+| Parents | Your Google Drive folder ID |
+
+---
+
+### Complete Workflow: Upload All Simulation Files to Google Drive
+
+```
+Run Simulation (completed)
+    → List Output Files
+    → Loop Over Items (SplitInBatches)
+        → Download File (binary)
+        → Google Drive Upload
+    → End
+```
+
+#### Detailed Steps:
+
+**1. List Output Files Node**
+- URL: `{{ $('Config').item.json.API_BASE_URL }}/api/files/list?folder_path={{ $('Run Simulation').item.json.output_directory }}`
+
+**2. SplitInBatches Node**
+- Batch Size: 1
+- Input: `{{ $json.files }}`
+
+**3. Download File Node**
+- URL: `{{ $('Config').item.json.API_BASE_URL }}/api/files/download?file_path={{ encodeURIComponent($json.path) }}`
+- Response Format: **File**
+
+**4. Google Drive Node**
+- Operation: Upload
+- Input Data Field Name: `data`
+- File Name: `{{ $json.name }}`
+- Parent Folder: Your destination folder ID
+
+---
+
+## 3D Geometry Export
+
+Export IDF building geometry to Blender-compatible formats (OBJ, glTF).
+
+### Node: Export 3D Model
+
+- **Node Type:** HTTP Request
+- **Name:** Export 3D Model
+
+| Setting | Value |
+|---------|-------|
+| Method | POST |
+| URL | `{{ $('Config').item.json.API_BASE_URL }}/api/export/3d` |
+| Body Content Type | JSON |
+
+**Body (JSON):**
+```json
+{
+  "idf_path": "{{ $('Generate Model').item.json.output_path }}",
+  "output_dir": "{{ $('Run Simulation').item.json.output_directory }}",
+  "formats": ["glb", "obj"]
+}
+```
+
+**Expected Response:**
+```json
+{
+  "success": true,
+  "exports": {
+    "glb": {
+      "success": true,
+      "gltf_path": "C:\\...\\outputs\\model.glb",
+      "format": "glb",
+      "file_size_bytes": 3532
+    },
+    "obj": {
+      "success": true,
+      "obj_path": "C:\\...\\outputs\\model.obj",
+      "mtl_path": "C:\\...\\outputs\\model.mtl"
+    }
+  },
+  "message": "Exported 2 format(s)"
+}
+```
+
+### Node: Get Geometry Info
+
+Get information about the building geometry without exporting.
+
+- **Node Type:** HTTP Request
+- **Name:** Get Geometry Info
+
+| Setting | Value |
+|---------|-------|
+| Method | GET |
+| URL | `{{ $('Config').item.json.API_BASE_URL }}/api/geometry/info` |
+
+**Query Parameters:**
+
+| Name | Value |
+|------|-------|
+| idf_path | `{{ $('Generate Model').item.json.output_path }}` |
+
+**Expected Response:**
+```json
+{
+  "idf_path": "C:\\...\\model.idf",
+  "zones": 1,
+  "surfaces": 6,
+  "fenestrations": 0,
+  "shading_surfaces": 0,
+  "total_vertices": 24,
+  "zone_names": ["Main Zone"]
+}
+```
+
+---
+
+## Export to Supabase Storage
+
+Upload all simulation output files to a Supabase storage bucket. This is an alternative to Google Drive for storing simulation results.
+
+### Prerequisites
+
+1. Create a Supabase project at https://supabase.com
+2. Create a storage bucket (e.g., `panicleDevelop_1`)
+3. Set environment variables in `.env`:
+   ```
+   SUPABASE_URL=https://your-project-id.supabase.co
+   SUPABASE_KEY=your-service-role-key
+   SUPABASE_BUCKET=your-bucket-name
+   ```
+
+**Note:** Use the `service_role` key (not the `anon` key) for server-side uploads.
+
+### Node: Export to Supabase
+
+- **Node Type:** HTTP Request
+- **Name:** Export to Supabase
+
+| Setting | Value |
+|---------|-------|
+| Method | POST |
+| URL | `{{ $('Config').item.json.API_BASE_URL }}/api/export/supabase` |
+| Body Content Type | JSON |
+
+**Body (JSON):**
+```json
+{
+  "source_folder": "{{ $('Run Simulation').item.json.output_directory }}"
+}
+```
+
+**Optional: Custom destination folder name:**
+```json
+{
+  "source_folder": "{{ $('Run Simulation').item.json.output_directory }}",
+  "destination_folder": "my_custom_folder_name"
+}
+```
+
+**Expected Response:**
+```json
+{
+  "success": true,
+  "supabase_bucket": "panicleDevelop_1",
+  "supabase_folder": "sim_20260108_120000",
+  "files_uploaded": 19,
+  "files_failed": 0,
+  "total_size_bytes": 1234567,
+  "files": [
+    {
+      "success": true,
+      "file_name": "model.csv",
+      "destination_path": "sim_20260108_120000/model.csv",
+      "size_bytes": 12345,
+      "content_type": "text/csv"
+    },
+    ...
+  ]
+}
+```
+
+### Updated Workflow Structure with Supabase Export
+
+```
+Manual Trigger
+    → Config (Set node) ← EDIT PARAMETERS HERE BEFORE EACH RUN
+    → Health Check → IF (healthy?)
+        ├─ Yes → Fetch Weather → IF (weather success?)
+        │           ├─ Yes → Generate Model → IF (model success?)
+        │           │           ├─ Yes → Run Simulation → IF (sim success?)
+        │           │           │           ├─ Yes → Get Results → Export to Supabase → End
+        │           │           │           └─ No → Error: Simulation Failed
+        │           │           └─ No → Error: Model Generation Failed
+        │           └─ No → Error: Weather Fetch Failed
+        └─ No → Error: Server Unavailable
+```
+
+### Error Handling
+
+If the Supabase export fails, the response will include error details:
+
+```json
+{
+  "success": false,
+  "supabase_bucket": "panicleDevelop_1",
+  "supabase_folder": "sim_20260108_120000",
+  "files_uploaded": 15,
+  "files_failed": 4,
+  "errors": [
+    {
+      "file_name": "large_file.sql",
+      "error": "Upload failed: file too large"
+    }
+  ]
+}
+```
+
+### Environment Configuration
+
+Add to your `.env` file:
+
+```bash
+# Supabase Storage Configuration
+SUPABASE_URL=https://egrzvwnjrtpwwmqzimff.supabase.co
+SUPABASE_KEY=sb_secret_WrrDDBigIm6KNHrQbTfgLg_imjpnPjJ
+SUPABASE_BUCKET=panicleDevelop_1
 ```

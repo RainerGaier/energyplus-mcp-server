@@ -21,7 +21,11 @@ dependencies = [
     "uvicorn[standard]",
     "pydantic>=2.0",
     "google-api-python-client",
-    "google-auth"
+    "google-auth",
+    "python-dotenv",
+    "geomeppy",
+    "trimesh",
+    "supabase"
 ]
 license = {text = "BSD-3-Clause-LBNL"}
 keywords = ["EnergyPlus", "MCP", "server"]
