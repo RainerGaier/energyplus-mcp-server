@@ -89,7 +89,7 @@ OUTPUT:
 | Parameterized model generation  | ✅ Working  | TemplateService generates customized IDFs                |
 | Structured report generation    | ⚠️ Basic   | Raw CSV/HTML only                                        |
 | 3D geometry export              | ✅ Working  | IDF → OBJ/glTF via GeomEppy + Trimesh                    |
-| Cloud storage (GCS)             | ❌ Missing  | Needed for deployment                                    |
+| Cloud storage (Supabase)        | ✅ Working  | Supabase storage bucket integration                      |
 | Building specification schema   | ✅ Working  | JSON schema with examples                                |
 | Cross-platform config           | ✅ Working  | Auto-detects platform, env vars supported                |
 

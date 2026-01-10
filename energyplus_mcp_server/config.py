@@ -247,21 +247,21 @@ class Config:
         """Set up logging configuration with both console and file handlers"""
         import logging.handlers
         from pathlib import Path
-        
+
         logger = logging.getLogger(__name__)
-        
+
         # Create logs directory
         log_dir = Path(self.paths.workspace_root) / "logs"
         log_dir.mkdir(exist_ok=True)
-        
+
         # Configure root logger
         root_logger = logging.getLogger()
         root_logger.setLevel(getattr(logging, self.server.log_level))
-        
+
         # Clear existing handlers
         for handler in root_logger.handlers[:]:
             root_logger.removeHandler(handler)
-        
+
         # Console handler (for stdout/stderr)
         console_handler = logging.StreamHandler()
         console_formatter = logging.Formatter(
@@ -270,33 +270,55 @@ class Config:
         )
         console_handler.setFormatter(console_formatter)
         root_logger.addHandler(console_handler)
-        
+
         # File handler for all logs
-        file_handler = logging.handlers.RotatingFileHandler(
-            log_dir / "energyplus_mcp_server.log",
-            maxBytes=10*1024*1024,  # 10MB
-            backupCount=5
-        )
+        # On Windows, use TimedRotatingFileHandler to avoid file locking issues
+        # with uvicorn's reload feature (multiple processes accessing same file)
+        if _is_windows():
+            # Use a simpler FileHandler on Windows to avoid rotation locking issues
+            # Files will be rotated manually or by date
+            file_handler = logging.handlers.TimedRotatingFileHandler(
+                log_dir / "energyplus_mcp_server.log",
+                when='midnight',
+                interval=1,
+                backupCount=7,
+                delay=True  # Delay file opening until first log message
+            )
+        else:
+            file_handler = logging.handlers.RotatingFileHandler(
+                log_dir / "energyplus_mcp_server.log",
+                maxBytes=10*1024*1024,  # 10MB
+                backupCount=5
+            )
         file_formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         file_handler.setFormatter(file_formatter)
         root_logger.addHandler(file_handler)
-        
+
         # Separate error log file
-        error_handler = logging.handlers.RotatingFileHandler(
-            log_dir / "energyplus_mcp_errors.log",
-            maxBytes=5*1024*1024,  # 5MB
-            backupCount=3
-        )
+        if _is_windows():
+            error_handler = logging.handlers.TimedRotatingFileHandler(
+                log_dir / "energyplus_mcp_errors.log",
+                when='midnight',
+                interval=1,
+                backupCount=7,
+                delay=True
+            )
+        else:
+            error_handler = logging.handlers.RotatingFileHandler(
+                log_dir / "energyplus_mcp_errors.log",
+                maxBytes=5*1024*1024,  # 5MB
+                backupCount=3
+            )
         error_handler.setLevel(logging.ERROR)
         error_handler.setFormatter(file_formatter)
         root_logger.addHandler(error_handler)
-        
+
         logger.info(f"Logging configured: level={self.server.log_level}")
         logger.info(f"Log files: {log_dir}")
-        
+
         return log_dir
 
 
