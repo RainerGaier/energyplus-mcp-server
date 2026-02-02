@@ -911,7 +911,7 @@ Upload all simulation output files to a Supabase storage bucket. This is an alte
 ### Prerequisites
 
 1. Create a Supabase project at https://supabase.com
-2. Create a storage bucket (e.g., `panicleDevelop_1`)
+2. Create a storage bucket (e.g., `my-simulation-outputs`)
 3. Set environment variables in `.env`:
    ```
    SUPABASE_URL=https://your-project-id.supabase.co
@@ -951,7 +951,7 @@ Upload all simulation output files to a Supabase storage bucket. This is an alte
 ```json
 {
   "success": true,
-  "supabase_bucket": "panicleDevelop_1",
+  "supabase_bucket": "my-simulation-outputs",
   "supabase_folder": "sim_20260108_120000",
   "files_uploaded": 19,
   "files_failed": 0,
@@ -992,7 +992,7 @@ If the Supabase export fails, the response will include error details:
 ```json
 {
   "success": false,
-  "supabase_bucket": "panicleDevelop_1",
+  "supabase_bucket": "my-simulation-outputs",
   "supabase_folder": "sim_20260108_120000",
   "files_uploaded": 15,
   "files_failed": 4,
@@ -1011,7 +1011,7 @@ Add to your `.env` file:
 
 ```bash
 # Supabase Storage Configuration
-SUPABASE_URL=https://egrzvwnjrtpwwmqzimff.supabase.co
-SUPABASE_KEY=sb_secret_WrrDDBigIm6KNHrQbTfgLg_imjpnPjJ
-SUPABASE_BUCKET=panicleDevelop_1
+SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_KEY=your-service-role-key
+SUPABASE_BUCKET=my-simulation-outputs
 ```
