@@ -1,0 +1,137 @@
+# =============================================================================
+# EnergyPlus MCP Server - GCP Production Dockerfile
+# =============================================================================
+#
+# PURPOSE: Production deployment on GCP VM alongside QSDsan Engine
+#
+# Build:
+#   docker build -f Dockerfile.gcp -t gcr.io/lotsawatts/energyplus-mcp:latest .
+#
+# Run:
+#   docker run -d --name energyplus-mcp \
+#     --network qsdsan-network \
+#     -p 8081:8081 \
+#     -e OPENAI_API_KEY=$OPENAI_API_KEY \
+#     gcr.io/lotsawatts/energyplus-mcp:latest
+#
+# =============================================================================
+
+FROM python:3.12-slim
+
+# -----------------------------------------------------------------------------
+# Build arguments
+# -----------------------------------------------------------------------------
+ARG TARGETPLATFORM
+ARG EPLUS_VER=25.2.0
+ARG EPLUS_HASH=cf7368216c
+ARG EPLUS_PREFIX=/app/software/EnergyPlusV25-2-0
+
+# -----------------------------------------------------------------------------
+# Labels
+# -----------------------------------------------------------------------------
+LABEL maintainer="Rainer Gaier <rainer.gaier@lbl.gov>"
+LABEL description="EnergyPlus MCP Server for building energy simulation"
+LABEL version="0.1.0"
+LABEL energyplus.version="${EPLUS_VER}"
+
+# -----------------------------------------------------------------------------
+# 1. System dependencies
+# -----------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Build tools
+    gcc \
+    build-essential \
+    # Utilities
+    curl \
+    wget \
+    # EnergyPlus runtime dependencies (X11 libs)
+    libx11-6 \
+    libxext6 \
+    libxrender1 \
+    libxtst6 \
+    libxi6 \
+    libxrandr2 \
+    libxinerama1 \
+    libxcursor1 \
+    # Diagram generation
+    graphviz \
+    && rm -rf /var/lib/apt/lists/*
+
+# -----------------------------------------------------------------------------
+# 2. Install EnergyPlus 25.2.0 (auto-detect architecture)
+# -----------------------------------------------------------------------------
+RUN set -eux; \
+    if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
+      EPLUS_DIST="Linux-Ubuntu22.04-arm64"; \
+    elif [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
+      EPLUS_DIST="Linux-Ubuntu22.04-x86_64"; \
+    else \
+      # Default to x86_64 if platform not specified (common for GCP VMs)
+      EPLUS_DIST="Linux-Ubuntu22.04-x86_64"; \
+    fi; \
+    echo "Installing EnergyPlus for platform: $EPLUS_DIST"; \
+    mkdir -p ${EPLUS_PREFIX}; \
+    wget -q "https://github.com/NREL/EnergyPlus/releases/download/v${EPLUS_VER}/EnergyPlus-${EPLUS_VER}-${EPLUS_HASH}-${EPLUS_DIST}.tar.gz" \
+         -O /tmp/eplus.tgz; \
+    tar -xzf /tmp/eplus.tgz -C ${EPLUS_PREFIX} --strip-components=1; \
+    ln -s ${EPLUS_PREFIX}/energyplus /usr/local/bin/energyplus; \
+    rm /tmp/eplus.tgz; \
+    # Verify installation
+    energyplus --version
+
+# -----------------------------------------------------------------------------
+# 3. Environment variables
+# -----------------------------------------------------------------------------
+ENV PATH="${EPLUS_PREFIX}:${PATH}" \
+    EPLUS_IDD_PATH="${EPLUS_PREFIX}/Energy+.idd" \
+    EPLUS_INSTALL_PATH="${EPLUS_PREFIX}" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# -----------------------------------------------------------------------------
+# 4. Application setup
+# -----------------------------------------------------------------------------
+WORKDIR /app
+
+# Copy dependency files first for better layer caching
+COPY pyproject.toml uv.lock ./
+
+# Install uv package manager and dependencies
+RUN pip install --no-cache-dir uv && \
+    uv sync --frozen --no-dev
+
+# Copy application code
+COPY energyplus_mcp_server/ ./energyplus_mcp_server/
+COPY sample_files/ ./sample_files/
+COPY templates/ ./templates/
+COPY schemas/ ./schemas/
+
+# Create necessary directories
+RUN mkdir -p /app/outputs /app/logs /app/jobs
+
+# -----------------------------------------------------------------------------
+# 5. Runtime configuration
+# -----------------------------------------------------------------------------
+# Override workspace paths for container environment
+ENV MCP_WORKSPACE_ROOT=/app \
+    MCP_OUTPUT_DIR=/app/outputs \
+    MCP_SAMPLE_FILES_PATH=/app/sample_files \
+    MCP_TEMP_DIR=/tmp
+
+# Default HTTP port (different from QSDsan's 8080)
+ENV ENERGYPLUS_PORT=8081
+
+# -----------------------------------------------------------------------------
+# 6. Health check
+# -----------------------------------------------------------------------------
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:${ENERGYPLUS_PORT}/health || exit 1
+
+# -----------------------------------------------------------------------------
+# 7. Expose port and set entrypoint
+# -----------------------------------------------------------------------------
+EXPOSE 8081
+
+# Run the HTTP server (FastAPI via uvicorn)
+CMD ["uv", "run", "uvicorn", "energyplus_mcp_server.http_server:app", \
+     "--host", "0.0.0.0", "--port", "8081"]

@@ -1,0 +1,126 @@
+# =============================================================================
+# EnergyPlus MCP - GCP VM Docker Compose
+# =============================================================================
+#
+# PURPOSE: Deploy EnergyPlus MCP alongside QSDsan Engine on shared GCP VM
+#
+# USAGE:
+#   # Copy to VM and run:
+#   docker compose -f docker-compose.gcp.yaml up -d
+#
+#   # Or with explicit env file:
+#   docker compose -f docker-compose.gcp.yaml --env-file .env up -d
+#
+# PREREQUISITES:
+#   - Docker network 'qsdsan-network' exists
+#   - Image pushed to GCR: gcr.io/lotsawatts/energyplus-mcp:latest
+#   - .env file with OPENAI_API_KEY (optional)
+#
+# =============================================================================
+
+services:
+  energyplus-mcp:
+    image: gcr.io/lotsawatts/energyplus-mcp:latest
+    container_name: energyplus-mcp
+
+    # Expose on port 8081 (QSDsan uses 8080)
+    ports:
+      - "8081:8081"
+
+    # Environment configuration
+    environment:
+      # Server configuration
+      - ENERGYPLUS_PORT=8081
+      - MCP_WORKSPACE_ROOT=/app
+      - MCP_OUTPUT_DIR=/app/outputs
+      - MCP_TEMP_DIR=/tmp
+
+      # Optional: OpenAI for AI-powered analysis
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+
+      # Optional: Supabase for cloud storage
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_KEY=${SUPABASE_KEY:-}
+
+      # Logging
+      - LOG_LEVEL=INFO
+
+    # Persistent volumes
+    volumes:
+      # Simulation outputs and jobs
+      - energyplus_outputs:/app/outputs
+      - energyplus_jobs:/app/jobs
+      - energyplus_logs:/app/logs
+
+    # Connect to shared network with other services
+    networks:
+      - shared-network
+
+    # Health monitoring
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Resource limits (adjust based on VM size)
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  energyplus_outputs:
+    name: energyplus_outputs
+  energyplus_jobs:
+    name: energyplus_jobs
+  energyplus_logs:
+    name: energyplus_logs
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  shared-network:
+    external: true
+    name: qsdsan-network  # Use existing network from QSDsan deployment
+
+# =============================================================================
+# DEPLOYMENT CHECKLIST
+# =============================================================================
+#
+# 1. Build and push image (from development machine):
+#    docker build -f Dockerfile.gcp -t gcr.io/lotsawatts/energyplus-mcp:latest .
+#    docker push gcr.io/lotsawatts/energyplus-mcp:latest
+#
+# 2. SSH to GCP VM:
+#    gcloud compute ssh qsdsan-vm --zone=us-central1-a
+#
+# 3. Authenticate Docker with GCR:
+#    # On local machine, get token:
+#    gcloud auth print-access-token
+#    # On VM:
+#    echo "TOKEN" | docker login -u oauth2accesstoken --password-stdin gcr.io
+#
+# 4. Ensure network exists:
+#    docker network create qsdsan-network || true
+#
+# 5. Copy this file to VM and deploy:
+#    docker compose -f docker-compose.gcp.yaml pull
+#    docker compose -f docker-compose.gcp.yaml up -d
+#
+# 6. Verify:
+#    docker ps
+#    curl http://localhost:8081/health
+#    curl http://34.28.104.162:8081/docs
+#
+# =============================================================================

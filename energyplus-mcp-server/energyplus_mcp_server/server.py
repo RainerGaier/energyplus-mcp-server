@@ -23,6 +23,8 @@ from mcp.server.fastmcp import FastMCP
 # Import our EnergyPlus utilities and configuration
 from energyplus_mcp_server.energyplus_tools import EnergyPlusManager
 from energyplus_mcp_server.config import get_config, Config
+from energyplus_mcp_server.utils.weather_lookup import WeatherLookup, WeatherLookupError
+from energyplus_mcp_server.utils.template_service import TemplateService, TemplateServiceError
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,9 @@ mcp = FastMCP(config.server.name)
 
 # Initialize EnergyPlus manager with configuration
 ep_manager = EnergyPlusManager(config)
+
+# Initialize template service
+template_service = TemplateService()
 
 logger.info(f"EnergyPlus MCP Server '{config.server.name}' v{config.server.version} initialized")
 
@@ -1354,6 +1359,367 @@ async def clear_logs() -> str:
     except Exception as e:
         logger.error(f"Error clearing logs: {str(e)}")
         return f"Error clearing logs: {str(e)}"
+
+
+# Initialize weather lookup service
+weather_lookup = WeatherLookup(
+    output_dir=os.path.join(config.paths.output_dir, "weather_files")
+)
+
+
+@mcp.tool()
+async def fetch_weather_by_location(
+    latitude: float,
+    longitude: float,
+    location_name: Optional[str] = None
+) -> str:
+    """
+    Fetch weather data for a location using latitude/longitude coordinates.
+
+    Downloads TMY (Typical Meteorological Year) weather data from PVGIS API
+    and saves it as an EnergyPlus EPW file that can be used for simulations.
+
+    Coverage:
+    - Europe, Africa, Asia: High-resolution satellite data
+    - Americas: NSRDB data
+    - Worldwide: ERA5 reanalysis data (lower resolution fallback)
+
+    Args:
+        latitude: Latitude in decimal degrees (-90 to 90, positive = North)
+                  Examples: 51.5 (London), 37.7749 (San Francisco), -33.9 (Cape Town)
+        longitude: Longitude in decimal degrees (-180 to 180, positive = East)
+                   Examples: -0.1 (London), -122.4 (San Francisco), 18.4 (Cape Town)
+        location_name: Optional name for the location (used in filename and metadata)
+                       Example: "London_UK", "San_Francisco_CA", "Cape_Town_SA"
+
+    Returns:
+        JSON string containing:
+        - success: Whether the fetch was successful
+        - epw_path: Path to the saved EPW weather file
+        - location: Dict with lat, lon, elevation, name
+        - metadata: Dict with data source information
+        - error: Error message if failed
+
+    Examples:
+        # Fetch weather for London, UK
+        fetch_weather_by_location(51.5074, -0.1278, "London_UK")
+
+        # Fetch weather for San Francisco, CA
+        fetch_weather_by_location(37.7749, -122.4194, "San_Francisco")
+
+        # Fetch weather for Cape Town, South Africa
+        fetch_weather_by_location(-33.9249, 18.4241, "Cape_Town")
+
+        # Fetch weather for a site in the UK river catchment
+        fetch_weather_by_location(52.2053, 0.1218, "Cambridge_UK")
+    """
+    try:
+        logger.info(f"Fetching weather for lat={latitude}, lon={longitude}, name={location_name}")
+        result = weather_lookup.fetch_weather_by_location(
+            latitude=latitude,
+            longitude=longitude,
+            location_name=location_name
+        )
+        return json.dumps(result, indent=2)
+    except WeatherLookupError as e:
+        logger.warning(f"Weather lookup failed: {str(e)}")
+        return json.dumps({
+            "success": False,
+            "error": str(e),
+            "latitude": latitude,
+            "longitude": longitude
+        }, indent=2)
+    except Exception as e:
+        logger.error(f"Unexpected error fetching weather: {str(e)}")
+        return json.dumps({
+            "success": False,
+            "error": f"Unexpected error: {str(e)}",
+            "latitude": latitude,
+            "longitude": longitude
+        }, indent=2)
+
+
+@mcp.tool()
+async def get_weather_coverage_info() -> str:
+    """
+    Get information about weather data coverage regions.
+
+    Returns details about which regions have high-resolution weather data
+    available and which fall back to lower-resolution global datasets.
+
+    Returns:
+        JSON string with coverage information for each data source
+
+    Example:
+        get_weather_coverage_info()
+    """
+    try:
+        coverage = weather_lookup.get_coverage_info()
+        return json.dumps({
+            "success": True,
+            "coverage_regions": coverage,
+            "api_source": "PVGIS v5.3 (European Commission)",
+            "documentation": "https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis/getting-started-pvgis/api-non-interactive-service_en"
+        }, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting coverage info: {str(e)}")
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        }, indent=2)
+
+
+@mcp.tool()
+async def check_weather_coverage(latitude: float, longitude: float) -> str:
+    """
+    Check which weather data sources are available for a specific location.
+
+    Use this to understand the quality of weather data available before
+    fetching the full weather file.
+
+    Args:
+        latitude: Latitude in decimal degrees (-90 to 90)
+        longitude: Longitude in decimal degrees (-180 to 180)
+
+    Returns:
+        JSON string with:
+        - available_databases: List of databases that cover this location
+        - recommended_database: Best database to use
+        - notes: Additional information about data quality
+
+    Example:
+        # Check coverage for London
+        check_weather_coverage(51.5074, -0.1278)
+
+        # Check coverage for remote Pacific location
+        check_weather_coverage(-15.0, -170.0)
+    """
+    try:
+        coverage = weather_lookup.check_location_coverage(latitude, longitude)
+        return json.dumps({
+            "success": True,
+            **coverage
+        }, indent=2)
+    except Exception as e:
+        logger.error(f"Error checking coverage: {str(e)}")
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        }, indent=2)
+
+
+# =============================================================================
+# Template and Building Specification Tools
+# =============================================================================
+
+
+@mcp.tool()
+async def list_building_templates(building_type: Optional[str] = None) -> str:
+    """
+    List available building templates for energy simulation.
+
+    Templates are pre-configured building models with HVAC systems that can
+    be customized based on building specifications.
+
+    Args:
+        building_type: Optional filter by building type (e.g., 'data_center', 'manufacturing')
+
+    Returns:
+        JSON string with list of available templates including:
+        - template_id: Unique identifier for the template
+        - name: Human-readable template name
+        - description: What the template represents
+        - building_type: Type of building (data_center, manufacturing, etc.)
+        - hvac_system: HVAC system included in template
+        - defaults: Default parameter values
+
+    Example:
+        # List all templates
+        list_building_templates()
+
+        # List only data center templates
+        list_building_templates("data_center")
+    """
+    try:
+        templates = template_service.list_templates(building_type)
+        return json.dumps({
+            "success": True,
+            "count": len(templates),
+            "templates": templates
+        }, indent=2)
+    except Exception as e:
+        logger.error(f"Error listing templates: {str(e)}")
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        }, indent=2)
+
+
+@mcp.tool()
+async def get_template_details(template_id: str) -> str:
+    """
+    Get detailed information about a specific building template.
+
+    Returns the full template metadata including all parameterizable fields,
+    their valid ranges, and default values.
+
+    Args:
+        template_id: Template identifier (e.g., 'DataCenter_SingleZone')
+
+    Returns:
+        JSON string with complete template metadata
+
+    Example:
+        get_template_details("DataCenter_SingleZone")
+    """
+    try:
+        template = template_service.get_template(template_id)
+
+        # Load full metadata
+        with open(template.metadata_path, "r", encoding="utf-8") as f:
+            metadata = json.load(f)
+
+        return json.dumps({
+            "success": True,
+            "template_id": template_id,
+            "metadata": metadata
+        }, indent=2)
+    except TemplateServiceError as e:
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        }, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting template details: {str(e)}")
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        }, indent=2)
+
+
+@mcp.tool()
+async def generate_building_model(
+    building_spec_json: str,
+    output_filename: Optional[str] = None,
+    template_id: Optional[str] = None
+) -> str:
+    """
+    Generate a customized EnergyPlus IDF model from a building specification.
+
+    This is the main entry point for creating simulation-ready building models
+    from high-level specifications. The tool:
+    1. Selects an appropriate template based on building type
+    2. Applies location, geometry, and system parameters
+    3. Generates a customized IDF file ready for simulation
+
+    Args:
+        building_spec_json: JSON string containing the building specification.
+            Required fields:
+            - location: {latitude, longitude, site_name (optional)}
+            - building_type: 'data_center', 'manufacturing', 'warehouse', etc.
+
+            Optional fields:
+            - geometry: {floor_area_m2, length_m, width_m, height_m, orientation_deg}
+            - data_center: {it_load_kw, rack_count, watts_per_rack, target_pue}
+            - manufacturing: {process_type, process_load_kw}
+            - setpoints: {cooling_setpoint_c, heating_setpoint_c}
+            - simulation_options: {run_annual, run_design_days}
+
+        output_filename: Optional output filename (default: auto-generated)
+        template_id: Optional specific template to use (default: auto-selected)
+
+    Returns:
+        JSON string with:
+        - output_path: Path to generated IDF file
+        - template_used: Template that was applied
+        - modifications_applied: List of changes made
+
+    Example:
+        # Generate a data center model for Cambridge, UK
+        generate_building_model('{
+            "project_name": "Cambridge Data Center",
+            "location": {"latitude": 52.2053, "longitude": 0.1218},
+            "building_type": "data_center",
+            "data_center": {"it_load_kw": 100, "rack_count": 50}
+        }')
+    """
+    try:
+        # Parse building specification
+        building_spec = json.loads(building_spec_json)
+
+        # Generate output filename if not provided
+        if not output_filename:
+            project_name = building_spec.get("project_name", "model")
+            safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in project_name)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_filename = f"{safe_name}_{timestamp}.idf"
+
+        # Determine output path
+        output_path = os.path.join(config.paths.output_dir, "models", output_filename)
+
+        # Generate the model
+        result = template_service.generate_model(
+            building_spec=building_spec,
+            output_path=output_path,
+            template_id=template_id
+        )
+
+        return json.dumps(result, indent=2)
+
+    except json.JSONDecodeError as e:
+        return json.dumps({
+            "success": False,
+            "error": f"Invalid JSON in building specification: {str(e)}"
+        }, indent=2)
+    except TemplateServiceError as e:
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        }, indent=2)
+    except Exception as e:
+        logger.error(f"Error generating building model: {str(e)}")
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        }, indent=2)
+
+
+@mcp.tool()
+async def get_building_specification_schema() -> str:
+    """
+    Get the JSON schema for building specifications.
+
+    Returns the complete schema that defines valid building specification
+    inputs, including all supported fields, their types, and constraints.
+
+    Use this to understand what parameters can be provided when generating
+    building models.
+
+    Returns:
+        JSON string containing the building specification schema
+    """
+    try:
+        schema_path = Path(__file__).parent.parent / "schemas" / "building_specification.json"
+
+        if not schema_path.exists():
+            return json.dumps({
+                "success": False,
+                "error": "Building specification schema not found"
+            }, indent=2)
+
+        with open(schema_path, "r", encoding="utf-8") as f:
+            schema = json.load(f)
+
+        return json.dumps({
+            "success": True,
+            "schema": schema
+        }, indent=2)
+    except Exception as e:
+        logger.error(f"Error loading schema: {str(e)}")
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        }, indent=2)
 
 
 if __name__ == "__main__":

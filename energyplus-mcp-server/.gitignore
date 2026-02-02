@@ -1,0 +1,79 @@
+# Outputs directory - simulation results
+outputs/
+
+# Illustrative examples with simulation outputs
+illustrative examples/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+nul
+
+# Local config (contains ngrok URLs, etc.)
+config/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# EnergyPlus temporary/intermediate files (if any outside outputs)
+*.audit
+*.bnd
+*.dxf
+*.edd
+*.eio
+*.end
+*.err
+*.eso
+*.mdd
+*.mtd
+*.mtr
+*.rdd
+*.rvaudit
+*.shd
+*.sql
+*.csv
+!sample_files/*.csv
+
+# Keep sample weather files
+!sample_files/*.epw
