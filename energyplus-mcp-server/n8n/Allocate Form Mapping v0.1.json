@@ -1,0 +1,517 @@
+{
+  "name": "Allocate Form Mapping v0.1",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        0
+      ],
+      "id": "am-manual-trigger",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "allocate-form-mapping",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        240
+      ],
+      "id": "am-webhook-trigger",
+      "name": "Webhook Trigger",
+      "webhookId": "allocate-form-mapping"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"run_id\": \"AllocMapping-{{ $now.format('yyyy-MM-dd_HH-mm') }}\",\n  \"template_ref\": \"WCN-001\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -160,
+        0
+      ],
+      "id": "am-default-params",
+      "name": "Default Params",
+      "notes": "Edit template_ref to match the template whose mapping you want to update"
+    },
+    {
+      "parameters": {
+        "url": "=https://egrzvwnjrtpwwmqzimff.supabase.co/storage/v1/object/panicleDevelop_1/PDF-templates/{{ $json.template_ref }}/{{ $json.template_ref }}_mapping.xlsx",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        80,
+        0
+      ],
+      "id": "am-download-mapping",
+      "name": "Download Mapping File",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var item = $input.first();\n\nvar templateRef = 'unknown';\ntry { templateRef = $('Default Params').first().json.template_ref || ''; } catch(e) {}\nif (!templateRef) {\n  try { templateRef = $('Extract Webhook Params').first().json.template_ref || ''; } catch(e) {}\n}\nif (!templateRef) { templateRef = 'unknown'; }\n\nvar hasBinary = false;\nvar binaryKeys = [];\nif (item.binary) {\n  var keys = Object.keys(item.binary);\n  binaryKeys = keys;\n  if (keys.length > 0) { hasBinary = true; }\n}\n\nreturn [{\n  json: {\n    template_ref: templateRef,\n    file_found: hasBinary,\n    binary_keys: binaryKeys,\n    had_error: item.json && item.json.error ? true : false,\n    raw_status: item.json && item.json.statusCode ? item.json.statusCode : ''\n  },\n  binary: hasBinary ? item.binary : undefined\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "id": "am-validate-exists",
+      "name": "Check Download Result"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "file-found-check",
+              "leftValue": "={{ $json.file_found }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        400,
+        0
+      ],
+      "id": "am-if-file-exists",
+      "name": "File Exists?"
+    },
+    {
+      "parameters": {
+        "jsCode": "var templateRef = $('Check Download Result').first().json.template_ref || 'unknown';\n\nreturn [{\n  json: {\n    status: 'not_found',\n    message: 'Mapping file not found for template \"' + templateRef + '\". Run \"Add Form Template v0.4\" first to discover fields and generate the mapping Excel.',\n    template_ref: templateRef,\n    expected_path: 'PDF-templates/' + templateRef + '/' + templateRef + '_mapping.xlsx',\n    next_step: 'Run the Add Form Template v0.4 workflow with this template to generate the mapping Excel, then re-run Allocate Form Mapping.'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        600,
+        200
+      ],
+      "id": "am-file-not-found",
+      "name": "File Not Found"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"run_id\": \"{{ $json.body.run_id || 'AllocMapping-' + $now.format('yyyy-MM-dd_HH-mm') }}\",\n  \"template_ref\": \"{{ $json.body.template_ref || '' }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -160,
+        240
+      ],
+      "id": "am-extract-webhook",
+      "name": "Extract Webhook Params"
+    },
+    {
+      "parameters": {
+        "jsCode": "var params = $input.first().json || {};\nvar templateRef = '';\nvar runId = '';\n\n// Try manual path first (Default Params node)\ntry {\n  var defaults = $('Default Params').first().json;\n  templateRef = defaults.template_ref || '';\n  runId = defaults.run_id || '';\n} catch(e) {\n  // Not on manual path\n}\n\n// Try webhook path (Extract Webhook Params node)\nif (!templateRef) {\n  try {\n    var webhook = $('Extract Webhook Params').first().json;\n    templateRef = webhook.template_ref || '';\n    runId = webhook.run_id || runId;\n  } catch(e) {\n    // Not on webhook path\n  }\n}\n\n// Fallback from direct input\nif (!templateRef) {\n  templateRef = params.template_ref || '';\n}\nif (!runId) {\n  runId = params.run_id || 'AllocMapping-manual';\n}\n\nif (!templateRef) {\n  throw new Error('Missing required field: template_ref');\n}\n\nreturn [{\n  json: {\n    run_id: runId,\n    template_ref: templateRef,\n    SUPABASE_URL: 'https://egrzvwnjrtpwwmqzimff.supabase.co'\n  },\n  binary: $input.first().binary\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        120
+      ],
+      "id": "am-validate-inputs",
+      "name": "Validate Inputs"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx"
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        760,
+        120
+      ],
+      "id": "am-read-excel",
+      "name": "Read Excel File"
+    },
+    {
+      "parameters": {
+        "jsCode": "var rows = $input.all();\nvar parsed = [];\nvar parseErrors = [];\n\nfor (var i = 0; i < rows.length; i++) {\n  var row = rows[i].json;\n  var pdfField = row['PDF Field Name'] || '';\n  var fieldType = row['Field Type'] || '';\n  var autoMapped = row['Auto-Mapped (data_key [source])'] || '';\n  var manualOverride = row['Manual Override (data_key [source])'] || '';\n  var notes = row['Notes'] || '';\n\n  if (!pdfField || String(pdfField).trim() === '') {\n    continue;\n  }\n\n  var effectiveValue = '';\n  var overrideApplied = false;\n\n  if (manualOverride && String(manualOverride).trim() !== '') {\n    effectiveValue = String(manualOverride).trim();\n    overrideApplied = true;\n  } else if (autoMapped && String(autoMapped).trim() !== '') {\n    effectiveValue = String(autoMapped).trim();\n  }\n\n  var dataKey = '';\n  var source = '';\n  if (effectiveValue !== '') {\n    var bracketIdx = effectiveValue.indexOf('[');\n    if (bracketIdx >= 0) {\n      dataKey = effectiveValue.substring(0, bracketIdx).trim();\n      var closeBracket = effectiveValue.indexOf(']', bracketIdx);\n      if (closeBracket >= 0) {\n        source = effectiveValue.substring(bracketIdx + 1, closeBracket).trim();\n      }\n    } else {\n      dataKey = effectiveValue;\n      parseErrors.push('Row ' + (i + 1) + ' (' + pdfField + '): No [source] specified for \"' + effectiveValue + '\". Expected format: data_key [source]');\n    }\n  }\n\n  parsed.push({\n    pdfField: String(pdfField).trim(),\n    fieldType: String(fieldType).trim(),\n    dataKey: dataKey,\n    source: source,\n    overrideApplied: overrideApplied,\n    originalAuto: String(autoMapped).trim(),\n    notes: String(notes).trim()\n  });\n}\n\nvar config = $('Validate Inputs').first().json;\n\nreturn [{\n  json: {\n    parsed_mappings: parsed,\n    row_count: parsed.length,\n    parse_errors: parseErrors,\n    has_parse_errors: parseErrors.length > 0,\n    _template_ref: config.template_ref,\n    _run_id: config.run_id\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        120
+      ],
+      "id": "am-parse-excel",
+      "name": "Parse Excel Rows"
+    },
+    {
+      "parameters": {
+        "url": "https://egrzvwnjrtpwwmqzimff.supabase.co/rest/v1/system_config?parameter=eq.user_details&limit=1",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1240,
+        120
+      ],
+      "id": "am-fetch-data-keys",
+      "name": "Fetch Valid Data Keys",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var parsed = $('Parse Excel Rows').first().json;\nvar configArr = $input.first().json;\n\nvar configRow = null;\nif (Array.isArray(configArr)) {\n  configRow = configArr[0];\n} else {\n  configRow = configArr;\n}\n\nvar validKeyMap = {};\nvar validKeys = [];\n\nif (configRow && configRow.setting && configRow.setting.fields) {\n  var fields = configRow.setting.fields;\n  for (var f = 0; f < fields.length; f++) {\n    validKeyMap[fields[f].key] = fields[f].source;\n    validKeys.push(fields[f].key);\n  }\n}\n\nvar mappings = parsed.parsed_mappings || [];\nvar validated = [];\nvar validationErrors = [];\nvar warningCount = 0;\nvar mappedCount = 0;\nvar unmappedCount = 0;\nvar overrideCount = 0;\n\nfor (var i = 0; i < mappings.length; i++) {\n  var m = mappings[i];\n  var entry = {\n    pdfField: m.pdfField,\n    fieldType: m.fieldType,\n    dataKey: m.dataKey,\n    source: m.source,\n    overrideApplied: m.overrideApplied,\n    originalAuto: m.originalAuto,\n    confidence: '',\n    score: 0,\n    notes: m.notes,\n    valid: true\n  };\n\n  if (m.dataKey && m.dataKey !== '') {\n    mappedCount++;\n    if (validKeyMap[m.dataKey] !== undefined) {\n      var expectedSource = validKeyMap[m.dataKey];\n      if (m.source && m.source !== '' && m.source !== expectedSource) {\n        validationErrors.push('Row ' + (i + 1) + ' (' + m.pdfField + '): data_key \"' + m.dataKey + '\" belongs to source \"' + expectedSource + '\", not \"' + m.source + '\". Using correct source.');\n        warningCount++;\n      }\n      entry.source = expectedSource;\n      entry.confidence = m.overrideApplied ? 'manual' : 'auto';\n    } else {\n      validationErrors.push('Row ' + (i + 1) + ' (' + m.pdfField + '): data_key \"' + m.dataKey + '\" is not in system_config valid fields: ' + validKeys.join(', ') + '.');\n      entry.valid = false;\n      warningCount++;\n    }\n  } else {\n    unmappedCount++;\n  }\n\n  if (m.overrideApplied) {\n    overrideCount++;\n  }\n\n  validated.push(entry);\n}\n\nvar parseErrors = parsed.parse_errors || [];\nvar allErrors = parseErrors.concat(validationErrors);\n\nreturn [{\n  json: {\n    validated_mappings: validated,\n    total_rows: validated.length,\n    mapped_count: mappedCount,\n    unmapped_count: unmappedCount,\n    override_count: overrideCount,\n    warning_count: warningCount,\n    validation_errors: allErrors,\n    valid_data_keys: validKeys,\n    _template_ref: parsed._template_ref,\n    _run_id: parsed._run_id\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1480,
+        120
+      ],
+      "id": "am-merge-validate",
+      "name": "Merge & Validate"
+    },
+    {
+      "parameters": {
+        "url": "=https://egrzvwnjrtpwwmqzimff.supabase.co/rest/v1/pdf_ff_templates?template_ref=eq.{{ $json._template_ref }}&select=id,template_ref,source_to_template_mapping&limit=1",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1720,
+        120
+      ],
+      "id": "am-fetch-existing",
+      "name": "Fetch Existing Mapping",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var validated = $('Merge & Validate').first().json;\nvar existingArr = $input.first().json;\n\nvar existing = null;\nif (Array.isArray(existingArr)) {\n  existing = existingArr[0];\n} else {\n  existing = existingArr;\n}\n\nif (!existing || !existing.id) {\n  throw new Error('Template not found for template_ref: ' + validated._template_ref);\n}\n\nvar oldMapping = existing.source_to_template_mapping || [];\nvar oldLookup = {};\nfor (var o = 0; o < oldMapping.length; o++) {\n  oldLookup[oldMapping[o].pdfField] = oldMapping[o];\n}\n\nvar newMapping = [];\nvar changes = [];\nvar entries = validated.validated_mappings || [];\n\nfor (var i = 0; i < entries.length; i++) {\n  var e = entries[i];\n  var oldEntry = oldLookup[e.pdfField];\n  var oldScore = oldEntry ? (oldEntry.score || 0) : 0;\n  var oldNotes = oldEntry ? (oldEntry.notes || '') : '';\n\n  var newEntry = {\n    pdfField: e.pdfField,\n    fieldType: e.fieldType,\n    dataKey: e.dataKey,\n    source: e.source,\n    confidence: e.overrideApplied ? 'manual' : (e.confidence || (oldEntry ? oldEntry.confidence : '')),\n    score: e.overrideApplied ? 1.0 : oldScore,\n    notes: e.overrideApplied ? 'manual override via Excel' : (e.notes || oldNotes)\n  };\n\n  if (oldEntry) {\n    if (oldEntry.dataKey !== e.dataKey || oldEntry.source !== e.source) {\n      changes.push({\n        pdfField: e.pdfField,\n        action: 'changed',\n        old_dataKey: oldEntry.dataKey || '',\n        old_source: oldEntry.source || '',\n        new_dataKey: e.dataKey || '',\n        new_source: e.source || '',\n        reason: e.overrideApplied ? 'manual override' : 'auto-mapped preserved'\n      });\n    }\n  } else {\n    if (e.dataKey && e.dataKey !== '') {\n      changes.push({\n        pdfField: e.pdfField,\n        action: 'added',\n        old_dataKey: '',\n        old_source: '',\n        new_dataKey: e.dataKey,\n        new_source: e.source,\n        reason: 'new mapping'\n      });\n    }\n  }\n\n  newMapping.push(newEntry);\n}\n\nreturn [{\n  json: {\n    template_id: existing.id,\n    template_ref: validated._template_ref,\n    new_mapping: newMapping,\n    audit: {\n      run_id: validated._run_id,\n      template_ref: validated._template_ref,\n      timestamp: new Date().toISOString(),\n      total_fields: newMapping.length,\n      mapped_count: validated.mapped_count,\n      unmapped_count: validated.unmapped_count,\n      overrides_applied: validated.override_count,\n      changes: changes,\n      change_count: changes.length,\n      validation_warnings: validated.validation_errors\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1960,
+        120
+      ],
+      "id": "am-build-payload",
+      "name": "Build Update Payload & Audit Diff"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://egrzvwnjrtpwwmqzimff.supabase.co/rest/v1/pdf_ff_templates?template_ref=eq.{{ $json.template_ref }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ source_to_template_mapping: $json.new_mapping, updated_at: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        120
+      ],
+      "id": "am-update-template",
+      "name": "Update Template Record",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var payload = $('Build Update Payload & Audit Diff').first().json;\nvar audit = payload.audit;\nvar dbResult = $input.first().json;\nvar dbRow = null;\nif (Array.isArray(dbResult)) {\n  dbRow = dbResult[0];\n} else {\n  dbRow = dbResult;\n}\n\nvar msg = 'Mapping updated for template ' + audit.template_ref + '. '\n  + audit.mapped_count + ' fields mapped, '\n  + audit.unmapped_count + ' still unmapped, '\n  + audit.overrides_applied + ' manual overrides applied, '\n  + audit.change_count + ' changes from previous mapping.';\n\nif (audit.validation_warnings && audit.validation_warnings.length > 0) {\n  msg = msg + ' ' + audit.validation_warnings.length + ' validation warnings.';\n}\n\nvar nextStep = '';\nif (audit.unmapped_count > 0) {\n  nextStep = 'There are still ' + audit.unmapped_count + ' unmapped fields. Re-export Excel from the template to see remaining gaps.';\n} else {\n  nextStep = 'All fields are mapped. Run Fill Form workflow to test.';\n}\n\nreturn [{\n  json: {\n    status: 'success',\n    message: msg,\n    template_ref: audit.template_ref,\n    template_id: payload.template_id,\n    mapped_fields: audit.mapped_count,\n    unmapped_fields: audit.unmapped_count,\n    overrides_applied: audit.overrides_applied,\n    changes: audit.changes,\n    change_count: audit.change_count,\n    validation_warnings: audit.validation_warnings,\n    next_step: nextStep\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2440,
+        120
+      ],
+      "id": "am-return-summary",
+      "name": "Return Summary"
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Default Params",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Default Params": {
+      "main": [
+        [
+          {
+            "node": "Download Mapping File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Mapping File": {
+      "main": [
+        [
+          {
+            "node": "Check Download Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Download Result": {
+      "main": [
+        [
+          {
+            "node": "File Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "File Exists?": {
+      "main": [
+        [
+          {
+            "node": "Validate Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "File Not Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Webhook Params",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Webhook Params": {
+      "main": [
+        [
+          {
+            "node": "Download Mapping File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Inputs": {
+      "main": [
+        [
+          {
+            "node": "Read Excel File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Excel File": {
+      "main": [
+        [
+          {
+            "node": "Parse Excel Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Excel Rows": {
+      "main": [
+        [
+          {
+            "node": "Fetch Valid Data Keys",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Valid Data Keys": {
+      "main": [
+        [
+          {
+            "node": "Merge & Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge & Validate": {
+      "main": [
+        [
+          {
+            "node": "Fetch Existing Mapping",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Existing Mapping": {
+      "main": [
+        [
+          {
+            "node": "Build Update Payload & Audit Diff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Update Payload & Audit Diff": {
+      "main": [
+        [
+          {
+            "node": "Update Template Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Template Record": {
+      "main": [
+        [
+          {
+            "node": "Return Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "0821db230f4e2311b0b89e42a29af9f42d365450a0a940495f8bb726d5a5a538"
+  },
+  "id": "AllocFormMapping01",
+  "tags": []
+}

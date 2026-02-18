@@ -1,0 +1,96 @@
+{
+  "name": "Form Fill Demo v0.1",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-560, 0],
+      "id": "demo-manual-trigger",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"form_type\": \"Water\",\n  \"user_id\": \"f24ee278-fb1e-42dc-8777-ac9af1954d25\",\n  \"additional_data\": {\n    \"project_name\": \"Demo Project\",\n    \"simulation_date\": \"{{ $now.format('yyyy-MM-dd') }}\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-320, 0],
+      "id": "demo-params",
+      "name": "Demo Params",
+      "notesInFlow": true,
+      "notes": "Change form_type to test different forms:\n- Environmental\n- Water\n- Planning\n- Electricity\n- Effluent"
+    },
+    {
+      "parameters": {
+        "jsCode": "var params = $input.first().json;\n\nvar lookup = {\n  'Environmental': 'ENV-001',\n  'Water':         'WCN-001',\n  'Planning':      'APP-001',\n  'Electricity':   'NEC-001',\n  'Effluent':      'TEF-001'\n};\n\nvar formType = params.form_type;\nvar ref = lookup[formType];\n\nif (!ref) {\n  throw new Error('Unknown form_type: ' + formType + '. Valid values: ' + Object.keys(lookup).join(', '));\n}\n\nreturn [{\n  json: {\n    run_id: 'Demo-' + ref + '-' + new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-'),\n    form_type: formType,\n    template_ref: ref,\n    user_id: params.user_id,\n    additional_data: params.additional_data || {}\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-80, 0],
+      "id": "demo-resolve",
+      "name": "Resolve Template"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/fill-form",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ run_id: $json.run_id, template_ref: $json.template_ref, user_id: $json.user_id, additional_data: $json.additional_data }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [200, 0],
+      "id": "demo-fill",
+      "name": "Fill Form"
+    },
+    {
+      "parameters": {
+        "jsCode": "var result = $input.first().json;\nvar params = $('Resolve Template').first().json;\n\nreturn [{\n  json: {\n    demo: 'Form Fill Demo',\n    form_type: params.form_type,\n    template_ref: params.template_ref,\n    run_id: params.run_id,\n    status: result.status || 'unknown',\n    fields_filled: result.fields_filled || 0,\n    fields_missing: result.fields_missing || 0,\n    final_pdf: result.final_pdf || '',\n    warnings: result.warnings || []\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 0],
+      "id": "demo-summary",
+      "name": "Demo Summary"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [{ "node": "Demo Params", "type": "main", "index": 0 }]
+      ]
+    },
+    "Demo Params": {
+      "main": [
+        [{ "node": "Resolve Template", "type": "main", "index": 0 }]
+      ]
+    },
+    "Resolve Template": {
+      "main": [
+        [{ "node": "Fill Form", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fill Form": {
+      "main": [
+        [{ "node": "Demo Summary", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "v0.1-2026-02-17",
+  "meta": {
+    "instanceId": "1a31eed7b82cb7f448f2abc5a538a777a1f9a344ccc5df5f3741cf94e7885baa"
+  },
+  "tags": []
+}

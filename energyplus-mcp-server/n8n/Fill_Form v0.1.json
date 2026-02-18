@@ -1,0 +1,373 @@
+{
+  "name": "Fill Form v0.1",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-1200, 0],
+      "id": "ff-manual-trigger",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fill-form",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1200, 240],
+      "id": "ff-webhook-trigger",
+      "name": "Webhook Trigger",
+      "webhookId": "fill-form"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"run_id\": \"FillForm-{{ $now.format('yyyy-MM-dd_HH-mm') }}\",\n  \"template_ref\": \"WCN-001\",\n  \"user_id\": \"f24ee278-fb1e-42dc-8777-ac9af1954d25\",\n  \"additional_data\": {}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-960, 0],
+      "id": "ff-default-params",
+      "name": "Default Params"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"run_id\": \"{{ $json.body.run_id || 'FillForm-' + $now.format('yyyy-MM-dd_HH-mm') }}\",\n  \"template_ref\": \"{{ $json.body.template_ref || '' }}\",\n  \"user_id\": \"{{ $json.body.user_id || '' }}\",\n  \"additional_data\": {{ JSON.stringify($json.body.additional_data || {}) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-960, 240],
+      "id": "ff-extract-webhook",
+      "name": "Extract Webhook Params"
+    },
+    {
+      "parameters": {
+        "jsCode": "var params = $input.first().json;\n\nif (!params.template_ref) {\n  throw new Error('Missing required field: template_ref');\n}\nif (!params.user_id) {\n  throw new Error('Missing required field: user_id');\n}\n\nreturn [{\n  json: {\n    run_id: params.run_id,\n    template_ref: params.template_ref,\n    user_id: params.user_id,\n    additional_data: params.additional_data || {},\n    SUPABASE_URL: 'https://egrzvwnjrtpwwmqzimff.supabase.co',\n    SUPABASE_BUCKET: 'panicleDevelop_1'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-640, 120],
+      "id": "ff-validate",
+      "name": "Validate Inputs"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.SUPABASE_URL }}/rest/v1/pdf_ff_templates?template_ref=eq.{{ $json.template_ref }}&limit=1",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [-400, 120],
+      "id": "ff-fetch-template",
+      "name": "Fetch Template",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Validate Inputs').item.json.SUPABASE_URL }}/rest/v1/users?id=eq.{{ $('Validate Inputs').item.json.user_id }}&limit=1",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [-160, 120],
+      "id": "ff-fetch-user",
+      "name": "Fetch User",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Validate Inputs').item.json.SUPABASE_URL }}/rest/v1/user_details?id=eq.{{ $('Validate Inputs').item.json.user_id }}&limit=1",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [80, 120],
+      "id": "ff-fetch-user-details",
+      "name": "Fetch User Details",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var templateArr = $('Fetch Template').first().json;\nvar userArr = $('Fetch User').first().json;\nvar config = $('Validate Inputs').first().json;\n\n// PostgREST returns an array\nvar template = Array.isArray(templateArr) ? templateArr[0] : templateArr;\nvar user = Array.isArray(userArr) ? userArr[0] : userArr;\n\nif (!template || !template.id) {\n  throw new Error('Template not found: ' + config.template_ref);\n}\nif (!user || !user.id) {\n  throw new Error('User not found: ' + config.user_id);\n}\n\n// Get user_details extension data (may not exist)\nvar userDetailsArr = $('Fetch User Details').first().json;\nvar userDetailsRow = Array.isArray(userDetailsArr) ? userDetailsArr[0] : userDetailsArr;\nvar extraDetails = (userDetailsRow && userDetailsRow.details) || {};\n\n// Build flat data payload from users table\nvar dataPayload = {\n  first_name: user.first_name || '',\n  last_name: user.last_name || '',\n  position: user.position || '',\n  phone_number: user.phone_number || '',\n  email: user.email || '',\n  company_name: user.company_name || '',\n  company_number: user.company_number || '',\n  company_address: user.company_address || '',\n  website: user.website || ''\n};\n\n// Merge user_details.details JSONB fields\nvar detailKeys = Object.keys(extraDetails);\nfor (var d = 0; d < detailKeys.length; d++) {\n  if (extraDetails[detailKeys[d]]) {\n    dataPayload[detailKeys[d]] = extraDetails[detailKeys[d]];\n  }\n}\n\n// Merge additional_data (from caller)\nvar addData = config.additional_data || {};\nvar addKeys = Object.keys(addData);\nfor (var i = 0; i < addKeys.length; i++) {\n  dataPayload[addKeys[i]] = addData[addKeys[i]];\n}\n\n// Build field mappings from template source_to_template_mapping\nvar mapping = template.source_to_template_mapping || [];\nvar fieldMappings = [];\nfor (var j = 0; j < mapping.length; j++) {\n  if (mapping[j].dataKey && mapping[j].dataKey !== '') {\n    var fm = {\n      pdfField: mapping[j].pdfField,\n      dataKey: mapping[j].dataKey\n    };\n    if (mapping[j].dateFormat) {\n      fm.dateFormat = mapping[j].dateFormat;\n    }\n    fieldMappings.push(fm);\n  }\n}\n\nvar result = Object.assign({}, dataPayload);\nresult.fieldMappings = fieldMappings;\nresult._meta = {\n  run_id: config.run_id,\n  template_id: template.id,\n  template_ref: config.template_ref,\n  user_id: config.user_id,\n  url_link: template.url_link,\n  mapped_count: fieldMappings.length,\n  total_fields: (template.input_field_list && template.input_field_list.fieldCount) || 0,\n  SUPABASE_URL: config.SUPABASE_URL,\n  SUPABASE_BUCKET: config.SUPABASE_BUCKET\n};\n\nreturn [{ json: result }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [320, 120],
+      "id": "ff-build-payload",
+      "name": "Build Data Payload"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json._meta.SUPABASE_URL }}/storage/v1/object/{{ $json._meta.SUPABASE_BUCKET }}/{{ $json._meta.url_link }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [560, 120],
+      "id": "ff-download-template",
+      "name": "Download PDF Template",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "fillForm",
+        "binaryPropertyName": "data",
+        "mappingSource": "dynamic",
+        "dynamicMappingProperty": "fieldMappings",
+        "outputBinaryProperty": "data",
+        "outputFileName": "={{ $('Build Data Payload').item.json._meta.template_ref }}-filled.pdf",
+        "warnOnMissingValues": true,
+        "defaultDateFormat": "DD/MM/YYYY"
+      },
+      "type": "n8n-nodes-pdf-form-filler.pdfFormFiller",
+      "typeVersion": 1,
+      "position": [800, 120],
+      "id": "ff-fill-form",
+      "name": "Fill Form"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Build Data Payload').item.json._meta.SUPABASE_URL }}/storage/v1/object/{{ $('Build Data Payload').item.json._meta.SUPABASE_BUCKET }}/form_runs/{{ $('Build Data Payload').item.json._meta.run_id }}/{{ $('Build Data Payload').item.json._meta.template_ref }}-filled.pdf",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-upsert",
+              "value": "true"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [1040, 120],
+      "id": "ff-upload-filled",
+      "name": "Upload Filled PDF",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var meta = $('Build Data Payload').item.json._meta;\nvar fillResult = $('Fill Form').first().json;\n\nvar final_pdf = 'form_runs/' + meta.run_id + '/' + meta.template_ref + '-filled.pdf';\n\nvar status = 'filled';\nif (fillResult.status === 'error') {\n  status = 'error';\n} else if (fillResult.fieldsMissing > 0) {\n  status = 'partial';\n}\n\nreturn [{\n  json: {\n    run_id: meta.run_id,\n    template_id: meta.template_id,\n    user_id: meta.user_id,\n    form_values: $('Build Data Payload').first().json,\n    fill_result: {\n      status: fillResult.status,\n      fieldsFilled: fillResult.fieldsFilled,\n      fieldsMissing: fillResult.fieldsMissing,\n      fieldsSkipped: fillResult.fieldsSkipped,\n      fieldsErrored: fillResult.fieldsErrored,\n      warnings: fillResult.warnings\n    },\n    final_pdf: final_pdf,\n    status: status\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1280, 120],
+      "id": "ff-prepare-audit",
+      "name": "Prepare Audit Record"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Build Data Payload').item.json._meta.SUPABASE_URL }}/rest/v1/form_run_data",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ run_id: $json.run_id, template_id: $json.template_id, user_id: $json.user_id, form_values: $json.form_values, fill_result: $json.fill_result, final_pdf: $json.final_pdf, status: $json.status }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [1520, 120],
+      "id": "ff-insert-audit",
+      "name": "Insert Audit Record",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var audit = $('Prepare Audit Record').first().json;\nvar meta = $('Build Data Payload').item.json._meta;\n\nvar publicUrl = meta.SUPABASE_URL + '/storage/v1/object/public/' + meta.SUPABASE_BUCKET + '/' + audit.final_pdf;\n\nreturn [{\n  json: {\n    status: audit.status,\n    run_id: audit.run_id,\n    template_ref: meta.template_ref,\n    final_pdf: publicUrl,\n    final_pdf_path: audit.final_pdf,\n    fields_filled: audit.fill_result.fieldsFilled,\n    fields_missing: audit.fill_result.fieldsMissing,\n    warnings: audit.fill_result.warnings\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1760, 120],
+      "id": "ff-return-result",
+      "name": "Return Result"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [{ "node": "Default Params", "type": "main", "index": 0 }]
+      ]
+    },
+    "Webhook Trigger": {
+      "main": [
+        [{ "node": "Extract Webhook Params", "type": "main", "index": 0 }]
+      ]
+    },
+    "Default Params": {
+      "main": [
+        [{ "node": "Validate Inputs", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Webhook Params": {
+      "main": [
+        [{ "node": "Validate Inputs", "type": "main", "index": 0 }]
+      ]
+    },
+    "Validate Inputs": {
+      "main": [
+        [{ "node": "Fetch Template", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Template": {
+      "main": [
+        [{ "node": "Fetch User", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch User": {
+      "main": [
+        [{ "node": "Fetch User Details", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch User Details": {
+      "main": [
+        [{ "node": "Build Data Payload", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Data Payload": {
+      "main": [
+        [{ "node": "Download PDF Template", "type": "main", "index": 0 }]
+      ]
+    },
+    "Download PDF Template": {
+      "main": [
+        [{ "node": "Fill Form", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fill Form": {
+      "main": [
+        [{ "node": "Upload Filled PDF", "type": "main", "index": 0 }]
+      ]
+    },
+    "Upload Filled PDF": {
+      "main": [
+        [{ "node": "Prepare Audit Record", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Audit Record": {
+      "main": [
+        [{ "node": "Insert Audit Record", "type": "main", "index": 0 }]
+      ]
+    },
+    "Insert Audit Record": {
+      "main": [
+        [{ "node": "Return Result", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "v0.1-2026-02-17b",
+  "meta": {
+    "instanceId": "1a31eed7b82cb7f448f2abc5a538a777a1f9a344ccc5df5f3741cf94e7885baa"
+  },
+  "tags": []
+}
