@@ -12,10 +12,12 @@ This folder contains n8n workflow definitions for the EnergyPlus MCP Server.
 | `EnergyPlus v0.4.json` | Webhook + session support | GCP VM | Superseded |
 | `EnergyPlus v0.5.json` | v0.4 + form-filling integration | GCP VM | **Current** |
 | `Add_Form-Template v0.2.json` | Upload & catalogue PDF form templates (initial) | Any | Superseded |
-| `Add Form Template v0.4.json` | Upload, discover, fuzzy auto-map, Excel export + Supabase upload | Any | **Current** |
+| `Add Form Template v0.4.json` | Upload, discover, fuzzy auto-map, Excel export + Supabase upload | Any | Superseded |
+| `Add Form Template v0.5.json` | v0.4 + Extended Info Excel for unmapped fields | Any | **Current** |
 | `Fill_Form v0.1.json` | Fill PDF forms with user data (sub-workflow) | Any | **Current** |
 | `Form Fill Demo v0.1.json` | End-to-end form fill demo (fetch template + user → fill → upload) | Any | **Current** |
 | `Allocate Form Mapping v0.1.json` | Download mapping Excel, apply overrides, validate, update Supabase | Any | **Current** |
+| `Update Extended Data v0.1.json` | Parse Extended Info Excel, upsert new data keys into user_details | Any | **Current** |
 
 ---
 
@@ -299,9 +301,11 @@ curl http://34.42.239.144:8081/health
 | v0.5 | Feb 2026 | Form-filling integration: user_id, form_templates params, calls Fill Form sub-workflow |
 | Add Form Template v0.2 | Feb 2026 | Upload PDF template → Discover Fields → catalogue in Supabase |
 | Add Form Template v0.4 | Feb 2026 | Fuzzy auto-mapping (Levenshtein + Jaccard), Excel export with override column, Supabase upload |
+| Add Form Template v0.5 | Feb 2026 | v0.4 + Extended Info Excel for unmapped fields (new data keys per user) |
 | Fill Form v0.1 | Feb 2026 | Reusable sub-workflow: fetch user data + template mapping → fill PDF → store result |
 | Form Fill Demo v0.1 | Feb 2026 | End-to-end demo: fetch template + user → fill PDF → upload + audit |
 | Allocate Form Mapping v0.1 | Feb 2026 | Excel-based mapping management: download, parse overrides, validate, update Supabase |
+| Update Extended Data v0.1 | Feb 2026 | Parse Extended Info Excel, upsert new data keys into user_details JSONB |
 
 ---
 
@@ -315,9 +319,14 @@ See `roadmap/planning/CR-001-form-handling-integration.md` for full design detai
 2. **n8n-nodes-pdf-form-filler** community node installed in your n8n instance
 3. **Supabase API credentials** configured in n8n (service_role key)
 
-### Add Form Template v0.4 (Current)
+### Add Form Template v0.5 (Current)
 
-Uploads a blank PDF form, auto-discovers its fields, applies fuzzy auto-mapping (Levenshtein + Jaccard similarity) against `system_config` user data keys, exports a 7-column Excel spreadsheet for manual review/override, and uploads both the template record and mapping Excel to Supabase.
+Uploads a blank PDF form, auto-discovers its fields, applies fuzzy auto-mapping (Levenshtein + Jaccard similarity) against `system_config` user data keys, and generates **two Excel files**:
+
+1. **Mapping Excel** (`{ref}_mapping.xlsx`) — 7-column spreadsheet for reviewing/overriding auto-mappings
+2. **Extended Info Excel** (`{ref}_extended_info.xlsx`) — 5-column spreadsheet with only unmapped fields, for defining new data keys and user-specific values
+
+Both files are uploaded to Supabase alongside the template record.
 
 **Trigger:** Manual or `POST /webhook/add-form-template`
 
@@ -327,15 +336,17 @@ Uploads a blank PDF form, auto-discovers its fields, applies fuzzy auto-mapping 
 ```
 Trigger → Validate → Upload PDF to Bucket → Discover Fields (FF Node)
   → Build Initial Mapping (fuzzy auto-map against system_config keys)
-  → Format Excel Rows (7 columns with manual override column)
-  → Write Mapping Excel (.xlsx) → Upload Mapping Excel to Supabase
-  → Insert into pdf_ff_templates → Return Summary
+  ├─→ Format Excel Rows (7 cols) → Write Mapping Excel → Upload Mapping Excel ──→ Insert Template Record
+  └─→ Filter Unmapped Fields → Format Extended Info Rows (5 cols)                       ↓
+       → Write Extended Info Excel → Upload Extended Info Excel              Return Summary
 ```
 
-**Excel columns:** PDF Field Name | Field Type | Auto-Mapped (data_key [source]) | Confidence | Score | Manual Override (data_key [source]) | Notes
+**Mapping Excel columns:** PDF Field Name | Field Type | Auto-Mapped (data_key [source]) | Confidence | Score | Manual Override (data_key [source]) | Notes
+
+**Extended Info Excel columns:** PDF Field Name | Field Type | Auto-Mapped (data_key [source]) | Extended data source | Extended data value
 
 **Setup:**
-1. Import `Add Form Template v0.4.json` into n8n
+1. Import `Add Form Template v0.5.json` into n8n
 2. Configure the Supabase API credential on HTTP nodes
 3. For manual testing: attach a PDF binary to the Manual Trigger input
 
@@ -397,6 +408,32 @@ Trigger → Default Params → Download Mapping File (from Supabase)
 ```
 
 **Key feature:** Column F ("Manual Override") takes precedence over Column C ("Auto-Mapped"). Users edit the Excel to override or add mappings, then run this workflow to push changes to Supabase.
+
+### Update Extended Data v0.1
+
+Parses a user-completed Extended Info Excel file and upserts new data keys into `user_details.details` JSONB for a specific user. Enables form-filling for fields that have no existing user data key.
+
+**Trigger:** Manual (with `Default Params` file path)
+
+**User process:**
+1. Download `{template_ref}_extended_info.xlsx` from Supabase (generated by Add Form Template v0.5)
+2. Fill column D ("Extended data source") with `new_key [user_details]`
+3. Fill column E ("Extended data value") with the actual value
+4. Save as `{template_ref}-Extended-info-{user_id}.xlsx` in `~/.n8n-files/`
+5. Run this workflow
+
+**Flow:**
+```
+Manual Trigger → Default Params → Read Binary File → Parse Filename
+  → Validate UUID → Read Excel File → Parse Excel Rows
+  → Upsert User Details (RPC) → Return Summary
+```
+
+**Key features:**
+- Extracts `template_ref` and `user_id` from the filename automatically
+- Validates UUID format and `[user_details]` source
+- Uses existing `upsert_user_details` stored procedure (JSONB merge — preserves existing keys)
+- Fails fast on parse errors with clear messages
 
 ### EnergyPlus v0.5
 

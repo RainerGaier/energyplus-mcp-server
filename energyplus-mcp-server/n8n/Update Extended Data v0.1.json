@@ -1,0 +1,250 @@
+{
+  "name": "Update Extended Data v0.1",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        0
+      ],
+      "id": "ued-manual-trigger",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"file_path\": \"C:\\\\Users\\\\gaierr\\\\.n8n-files\\\\TEF-001-Extended-info-f24ee278-fb1e-42dc-8777-ac9af1954d25.xlsx\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -160,
+        0
+      ],
+      "id": "ued-default-params",
+      "name": "Default Params",
+      "notes": "Edit file_path to point to the completed Extended Info Excel file.\nFilename format: {template_ref}-Extended-info-{user_id}.xlsx"
+    },
+    {
+      "parameters": {
+        "filePath": "={{ $json.file_path }}"
+      },
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        80,
+        0
+      ],
+      "id": "ued-read-file",
+      "name": "Read Binary File"
+    },
+    {
+      "parameters": {
+        "jsCode": "var item = $input.first();\nvar fileName = '';\n\nif (item.binary && item.binary.data) {\n  fileName = item.binary.data.fileName || '';\n}\n\nif (!fileName) {\n  var filePath = $('Default Params').first().json.file_path || '';\n  var parts = filePath.replace(/\\\\/g, '/').split('/');\n  fileName = parts[parts.length - 1];\n}\n\nif (!fileName) {\n  throw new Error('Could not determine filename from input');\n}\n\nvar baseName = fileName.replace('.xlsx', '').replace('.XLSX', '');\n\nvar marker = '-Extended-info-';\nvar markerIdx = baseName.indexOf(marker);\n\nif (markerIdx === -1) {\n  throw new Error('Invalid filename format: \"' + fileName + '\". Expected: {template_ref}-Extended-info-{user_id}.xlsx');\n}\n\nvar templateRef = baseName.substring(0, markerIdx);\nvar userId = baseName.substring(markerIdx + marker.length);\n\nif (!templateRef) {\n  throw new Error('Could not extract template_ref from filename: ' + fileName);\n}\nif (!userId) {\n  throw new Error('Could not extract user_id from filename: ' + fileName);\n}\n\nreturn [{\n  json: {\n    template_ref: templateRef,\n    user_id: userId,\n    original_filename: fileName\n  },\n  binary: item.binary\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        0
+      ],
+      "id": "ued-parse-filename",
+      "name": "Parse Filename"
+    },
+    {
+      "parameters": {
+        "jsCode": "var data = $input.first().json;\nvar userId = data.user_id;\n\nvar uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\n\nif (!uuidPattern.test(userId)) {\n  throw new Error('Invalid user_id format: \"' + userId + '\". Expected UUID format (e.g. 4a62ed11-6360-41fe-81fb-72f711f23f4b)');\n}\n\nreturn [{\n  json: {\n    template_ref: data.template_ref,\n    user_id: userId,\n    original_filename: data.original_filename,\n    SUPABASE_URL: 'https://egrzvwnjrtpwwmqzimff.supabase.co'\n  },\n  binary: $input.first().binary\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        0
+      ],
+      "id": "ued-validate-uuid",
+      "name": "Validate UUID"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx"
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        800,
+        0
+      ],
+      "id": "ued-read-excel",
+      "name": "Read Excel File"
+    },
+    {
+      "parameters": {
+        "jsCode": "var rows = $input.all();\nvar config = $('Validate UUID').first().json;\nvar newDataKeys = {};\nvar parseErrors = [];\nvar rowsParsed = 0;\n\nfor (var i = 0; i < rows.length; i++) {\n  var row = rows[i].json;\n  var pdfField = row['PDF Field Name'] || '';\n  var extSource = row['Extended data source'] || '';\n  var extValue = row['Extended data value'];\n\n  if (!extSource || String(extSource).trim() === '') {\n    continue;\n  }\n  if (extValue === undefined || extValue === null || String(extValue).trim() === '') {\n    continue;\n  }\n\n  var trimmedSource = String(extSource).trim();\n  var bracketIdx = trimmedSource.indexOf('[');\n\n  if (bracketIdx === -1) {\n    parseErrors.push('Row ' + (i + 2) + ' (' + pdfField + '): Column D missing [source]. Expected format: data_key [user_details]');\n    continue;\n  }\n\n  var dataKey = trimmedSource.substring(0, bracketIdx).trim();\n  var closeBracket = trimmedSource.indexOf(']', bracketIdx);\n  var source = '';\n\n  if (closeBracket >= 0) {\n    source = trimmedSource.substring(bracketIdx + 1, closeBracket).trim();\n  }\n\n  if (source !== 'user_details') {\n    parseErrors.push('Row ' + (i + 2) + ' (' + pdfField + '): Source must be [user_details], got [' + source + ']');\n    continue;\n  }\n\n  var validKeyPattern = /^[a-z][a-z0-9_]*$/;\n  if (!validKeyPattern.test(dataKey)) {\n    parseErrors.push('Row ' + (i + 2) + ' (' + pdfField + '): Invalid data_key \"' + dataKey + '\". Must be lowercase letters, numbers, underscores, starting with a letter.');\n    continue;\n  }\n\n  newDataKeys[dataKey] = String(extValue).trim();\n  rowsParsed++;\n}\n\nif (parseErrors.length > 0) {\n  throw new Error('Parse errors found:\\n' + parseErrors.join('\\n'));\n}\n\nvar keysList = Object.keys(newDataKeys);\n\nif (keysList.length === 0) {\n  throw new Error('No data keys found in Excel file. Ensure columns D and E are filled for at least one row.');\n}\n\nreturn [{\n  json: {\n    template_ref: config.template_ref,\n    user_id: config.user_id,\n    details_jsonb: newDataKeys,\n    keys_list: keysList,\n    keys_count: keysList.length,\n    SUPABASE_URL: config.SUPABASE_URL\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        0
+      ],
+      "id": "ued-parse-rows",
+      "name": "Parse Excel Rows"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://egrzvwnjrtpwwmqzimff.supabase.co/rest/v1/rpc/upsert_user_details",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_user_id: $json.user_id, p_details: $json.details_jsonb }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1280,
+        0
+      ],
+      "id": "ued-upsert",
+      "name": "Upsert User Details",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var parsed = $('Parse Excel Rows').first().json;\nvar rpcResult = $input.first().json;\n\nvar keysList = parsed.keys_list || [];\nvar keysStr = keysList.join(', ');\n\nvar msg = 'Successfully updated user_details for user ' + parsed.user_id + '. '\n  + 'Added/updated ' + keysList.length + ' data keys: ' + keysStr + '. '\n  + 'These values are now available for form filling.';\n\nreturn [{\n  json: {\n    status: 'success',\n    message: msg,\n    user_id: parsed.user_id,\n    template_ref: parsed.template_ref,\n    keys_updated: keysList,\n    keys_count: keysList.length,\n    updated_details: rpcResult,\n    next_step: 'Run Fill Form workflow with this user_id and any template that has fields mapped to these new data keys.'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        0
+      ],
+      "id": "ued-summary",
+      "name": "Return Summary"
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Default Params",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Default Params": {
+      "main": [
+        [
+          {
+            "node": "Read Binary File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Binary File": {
+      "main": [
+        [
+          {
+            "node": "Parse Filename",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Filename": {
+      "main": [
+        [
+          {
+            "node": "Validate UUID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate UUID": {
+      "main": [
+        [
+          {
+            "node": "Read Excel File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Excel File": {
+      "main": [
+        [
+          {
+            "node": "Parse Excel Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Excel Rows": {
+      "main": [
+        [
+          {
+            "node": "Upsert User Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert User Details": {
+      "main": [
+        [
+          {
+            "node": "Return Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "v0.1-2026-02-20",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "0821db230f4e2311b0b89e42a29af9f42d365450a0a940495f8bb726d5a5a538"
+  },
+  "id": "UpdateExtData01",
+  "tags": []
+}
