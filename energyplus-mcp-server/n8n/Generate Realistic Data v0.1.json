@@ -1,0 +1,233 @@
+{
+  "name": "Generate Realistic Data v0.1",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-realistic-data",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-400, 0],
+      "id": "grd-webhook-trigger",
+      "name": "Webhook Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "var body = $input.first().json.body || $input.first().json;\n\nvar userId = body.user_id || 'f24ee278-fb1e-42dc-8777-ac9af1954d25';\nvar templateRef = body.template_ref || 'TEF-001';\nvar domainContext = body.domain_context || 'a UK regulatory form submission';\nvar apiKey = body.openai_api_key || '';\nvar supabaseUrl = body.supabase_url || 'https://egrzvwnjrtpwwmqzimff.supabase.co';\n\nif (!apiKey) {\n  throw new Error('Missing required field: openai_api_key. Pass it in the webhook POST body.');\n}\n\nvar uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nif (!uuidPattern.test(userId)) {\n  throw new Error('Invalid user_id format: \"' + userId + '\". Expected UUID.');\n}\n\nreturn [{\n  json: {\n    user_id: userId,\n    template_ref: templateRef,\n    domain_context: domainContext,\n    OPENAI_API_KEY: apiKey,\n    SUPABASE_URL: supabaseUrl\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-160, 0],
+      "id": "grd-validate-params",
+      "name": "Validate Params"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.SUPABASE_URL }}/rest/v1/user_details?id=eq.{{ $json.user_id }}&select=id,details&limit=1",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [80, 0],
+      "id": "grd-fetch-user-details",
+      "name": "Fetch User Details",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Validate Params').first().json.SUPABASE_URL }}/rest/v1/pdf_ff_templates?template_ref=eq.{{ $('Validate Params').first().json.template_ref }}&select=template_ref,title,description,source_to_template_mapping&limit=1",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [320, 0],
+      "id": "grd-fetch-template",
+      "name": "Fetch Template",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var config = $('Validate Params').first().json;\nvar userResult = $('Fetch User Details').first().json;\nvar tplResult = $input.first().json;\n\nif (Array.isArray(userResult)) { userResult = userResult[0]; }\nif (Array.isArray(tplResult)) { tplResult = tplResult[0]; }\n\nif (!userResult || !userResult.details) {\n  throw new Error('User details not found for user_id: ' + config.user_id);\n}\nif (!tplResult || !tplResult.source_to_template_mapping) {\n  throw new Error('Template not found: ' + config.template_ref);\n}\n\nvar details = userResult.details;\nvar mapping = tplResult.source_to_template_mapping;\nvar templateTitle = tplResult.title || config.template_ref;\nvar templateDesc = tplResult.description || '';\n\nvar mappingLookup = {};\nfor (var m = 0; m < mapping.length; m++) {\n  var entry = mapping[m];\n  if (entry.dataKey) {\n    mappingLookup[entry.dataKey] = entry.pdfField || entry.dataKey;\n  }\n}\n\nvar syntheticFields = [];\nvar detailKeys = Object.keys(details);\nfor (var i = 0; i < detailKeys.length; i++) {\n  var key = detailKeys[i];\n  var val = String(details[key] || '');\n  if (val.toLowerCase().indexOf('synthetic') === 0) {\n    var pdfLabel = mappingLookup[key] || key;\n    syntheticFields.push({\n      dataKey: key,\n      pdfFieldLabel: pdfLabel,\n      currentValue: val\n    });\n  }\n}\n\nif (syntheticFields.length === 0) {\n  throw new Error('No fields with \"Synthetic\" values found in user_details for user ' + config.user_id + '. Nothing to enrich. Run Generate Synthetic Data workflow first.');\n}\n\nvar fieldList = '';\nfor (var f = 0; f < syntheticFields.length; f++) {\n  var sf = syntheticFields[f];\n  fieldList = fieldList + '- ' + sf.dataKey + ' (PDF label: \"' + sf.pdfFieldLabel + '\")\\n';\n}\n\nvar domainCtx = config.domain_context || 'a UK regulatory form submission';\n\nvar prompt = 'You are generating realistic test data for: ' + templateTitle + '.';\nif (templateDesc) {\n  prompt = prompt + ' Description: ' + templateDesc + '.';\n}\nprompt = prompt + '\\n\\nDomain context: ' + domainCtx + '.';\nprompt = prompt + '\\n\\nFor each field below, provide a plausible, realistic value that would appear on a real application. Use UK formats where applicable (dates as DD/MM/YYYY, phone numbers as +44, postcodes, etc.). Values should be internally consistent (same company, same site address, etc.).';\nprompt = prompt + '\\n\\nFields needing realistic values:\\n' + fieldList;\nprompt = prompt + '\\nReturn ONLY a valid JSON object mapping each dataKey to its realistic value. No markdown, no explanation, just the JSON object. Example format:\\n{\\n  \"field_key_1\": \"realistic value 1\",\\n  \"field_key_2\": \"realistic value 2\"\\n}';\n\nreturn [{\n  json: {\n    user_id: config.user_id,\n    template_ref: config.template_ref,\n    SUPABASE_URL: config.SUPABASE_URL,\n    OPENAI_API_KEY: config.OPENAI_API_KEY,\n    template_title: templateTitle,\n    synthetic_field_count: syntheticFields.length,\n    synthetic_fields: syntheticFields,\n    existing_details: details,\n    prompt: prompt\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 0],
+      "id": "grd-build-prompt",
+      "name": "Build LLM Prompt"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.OPENAI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'gpt-4o', max_tokens: 4096, messages: [{ role: 'user', content: $json.prompt }] }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [800, 0],
+      "id": "grd-call-openai",
+      "name": "Call OpenAI API"
+    },
+    {
+      "parameters": {
+        "jsCode": "var config = $('Build LLM Prompt').first().json;\nvar apiResponse = $input.first().json;\n\n// Parse LLM response\nvar responseText = '';\nif (apiResponse.choices && apiResponse.choices.length > 0) {\n  responseText = apiResponse.choices[0].message.content || '';\n} else if (apiResponse.error) {\n  throw new Error('OpenAI API error: ' + JSON.stringify(apiResponse.error));\n} else {\n  throw new Error('Unexpected OpenAI API response: ' + JSON.stringify(apiResponse));\n}\n\nresponseText = responseText.trim();\nif (responseText.indexOf('```') >= 0) {\n  var startIdx = responseText.indexOf('{');\n  var endIdx = responseText.lastIndexOf('}');\n  if (startIdx >= 0 && endIdx > startIdx) {\n    responseText = responseText.substring(startIdx, endIdx + 1);\n  }\n}\n\nvar realisticValues = {};\ntry {\n  realisticValues = JSON.parse(responseText);\n} catch (e) {\n  throw new Error('Failed to parse LLM response as JSON. Raw response: ' + responseText.substring(0, 500));\n}\n\nvar keys = Object.keys(realisticValues);\nif (keys.length === 0) {\n  throw new Error('LLM returned empty JSON object. Raw response: ' + responseText.substring(0, 500));\n}\n\n// Merge realistic values into existing details\nvar existingDetails = config.existing_details || {};\nvar mergedDetails = JSON.parse(JSON.stringify(existingDetails));\nvar replaced = [];\nfor (var i = 0; i < keys.length; i++) {\n  var dk = keys[i];\n  var oldVal = mergedDetails[dk] || '(missing)';\n  mergedDetails[dk] = realisticValues[dk];\n  replaced.push(dk + ': ' + String(realisticValues[dk]).substring(0, 60));\n}\n\nreturn [{\n  json: {\n    user_id: config.user_id,\n    template_ref: config.template_ref,\n    template_title: config.template_title,\n    SUPABASE_URL: config.SUPABASE_URL,\n    field_count: keys.length,\n    realistic_values: realisticValues,\n    merged_details: mergedDetails,\n    replaced_summary: replaced\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1040, 0],
+      "id": "grd-parse-response",
+      "name": "Parse LLM Response"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $json.SUPABASE_URL }}/rest/v1/user_details?id=eq.{{ $json.user_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ details: $json.merged_details }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1280, 0],
+      "id": "grd-update-user-details",
+      "name": "Update User Details",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var parsed = $('Parse LLM Response').first().json;\nvar updateResult = $input.first().json;\n\n// Check if the PATCH returned updated rows\nvar updated = Array.isArray(updateResult) ? updateResult : [updateResult];\nvar success = updated.length > 0 && updated[0].id;\n\nvar result = {\n  status: success ? 'applied' : 'error',\n  message: success\n    ? 'Realistic data generated and applied for ' + parsed.field_count + ' fields.'\n    : 'Failed to update user_details. Check Supabase response.',\n  template_ref: parsed.template_ref,\n  template_title: parsed.template_title,\n  user_id: parsed.user_id,\n  fields_updated: parsed.field_count,\n  replaced_summary: parsed.replaced_summary,\n  realistic_values: parsed.realistic_values\n};\n\nif (!success) {\n  result.supabase_response = updateResult;\n}\n\nreturn [{ json: result }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1520, 0],
+      "id": "grd-return-result",
+      "name": "Return Result"
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [{ "node": "Validate Params", "type": "main", "index": 0 }]
+      ]
+    },
+    "Validate Params": {
+      "main": [
+        [{ "node": "Fetch User Details", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch User Details": {
+      "main": [
+        [{ "node": "Fetch Template", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Template": {
+      "main": [
+        [{ "node": "Build LLM Prompt", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build LLM Prompt": {
+      "main": [
+        [{ "node": "Call OpenAI API", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call OpenAI API": {
+      "main": [
+        [{ "node": "Parse LLM Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse LLM Response": {
+      "main": [
+        [{ "node": "Update User Details", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update User Details": {
+      "main": [
+        [{ "node": "Return Result", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "v0.1-2026-02-22",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "0821db230f4e2311b0b89e42a29af9f42d365450a0a940495f8bb726d5a5a538"
+  },
+  "id": "GenerateRealisticData01",
+  "tags": []
+}

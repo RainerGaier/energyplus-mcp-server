@@ -32,7 +32,7 @@
     {
       "parameters": {
         "mode": "raw",
-        "jsonOutput": "={\n  \"run_id\": \"AddTemplate-{{ $now.format('yyyy-MM-dd_HH-mm') }}\",\n  \"title\": \"Anglian Water Connection\",\n  \"description\": \"Anglian - Application for a new water connection\",\n  \"template_ref\": \"WCN-001\",\n  \"source_site\": \"https://anglianwater.co.uk\",\n  \"version\": \"1.0\"\n}",
+        "jsonOutput": "={\n  \"run_id\": \"AddTemplate-{{ $now.format('yyyy-MM-dd_HH-mm') }}\",\n  \"title\": \"Anglian Water Connection\",\n  \"description\": \"Anglian - Application for a new water connection\",\n  \"template_ref\": \"WCN-001\",\n  \"source_file\": \"aws-new-water-connection-form-2023-sm.pdf\",\n  \"source_site\": \"https://anglianwater.co.uk\",\n  \"version\": \"1.0\"\n}",
         "options": {}
       },
       "type": "n8n-nodes-base.set",
@@ -47,7 +47,7 @@
     {
       "parameters": {
         "mode": "raw",
-        "jsonOutput": "={\n  \"run_id\": \"{{ $json.body.run_id || 'AddTemplate-' + $now.format('yyyy-MM-dd_HH-mm') }}\",\n  \"title\": \"{{ $json.body.title || '' }}\",\n  \"description\": \"{{ $json.body.description || '' }}\",\n  \"template_ref\": \"{{ $json.body.template_ref || '' }}\",\n  \"source_site\": \"{{ $json.body.source_site || '' }}\",\n  \"version\": \"{{ $json.body.version || '1.0' }}\"\n}",
+        "jsonOutput": "={\n  \"run_id\": \"{{ $json.body.run_id || 'AddTemplate-' + $now.format('yyyy-MM-dd_HH-mm') }}\",\n  \"title\": \"{{ $json.body.title || '' }}\",\n  \"description\": \"{{ $json.body.description || '' }}\",\n  \"template_ref\": \"{{ $json.body.template_ref || '' }}\",\n  \"source_file\": \"{{ $json.body.source_file || '' }}\",\n  \"source_site\": \"{{ $json.body.source_site || '' }}\",\n  \"version\": \"{{ $json.body.version || '1.0' }}\"\n}",
         "options": {}
       },
       "type": "n8n-nodes-base.set",
@@ -145,12 +145,12 @@
     },
     {
       "parameters": {
-        "jsCode": "var config = $('Build Storage URL').item.json;\nvar discoverResult = $input.first().json;\n\n// ── Known data-source fields with aliases ──\nvar userFields = [\n  { key: 'first_name', source: 'users', aliases: ['first name', 'forename', 'given name', 'firstname'] },\n  { key: 'last_name', source: 'users', aliases: ['last name', 'surname', 'family name', 'lastname'] },\n  { key: 'position', source: 'users', aliases: ['position', 'job title', 'role'] },\n  { key: 'phone_number', source: 'users', aliases: ['phone number', 'telephone number', 'telephone', 'tel number', 'landline', 'contact number'] },\n  { key: 'email', source: 'users', aliases: ['email', 'email address', 'e-mail', 'e mail'] },\n  { key: 'company_name', source: 'users', aliases: ['company', 'company name', 'organisation', 'organization', 'business name'] },\n  { key: 'company_number', source: 'users', aliases: ['company number', 'company no', 'registration number', 'company reg'] },\n  { key: 'company_address', source: 'users', aliases: ['company address', 'business address', 'registered address'] },\n  { key: 'website', source: 'users', aliases: ['website', 'web site', 'url'] },\n  { key: 'mobile_number', source: 'user_details', aliases: ['mobile', 'mobile number', 'mobile no', 'cell phone', 'mob number'] },\n  { key: 'postcode', source: 'user_details', aliases: ['postcode', 'post code', 'zip code'] },\n  { key: 'title', source: 'user_details', aliases: ['title', 'salutation', 'prefix'] }\n];\n\nvar MIN_FIELD_LEN = 3;\nvar MIN_SCORE = 0.78;\nvar MIN_ALIAS_LEN = 4;\n\n// ── Levenshtein distance ──\nfunction levenshtein(a, b) {\n  var m = a.length, n = b.length;\n  var dp = [];\n  for (var i = 0; i <= m; i++) {\n    dp[i] = [i];\n    for (var j = 1; j <= n; j++) {\n      dp[i][j] = 0;\n    }\n  }\n  for (var j2 = 0; j2 <= n; j2++) { dp[0][j2] = j2; }\n  for (var i2 = 1; i2 <= m; i2++) {\n    for (var j3 = 1; j3 <= n; j3++) {\n      var cost = (a[i2-1] === b[j3-1]) ? 0 : 1;\n      dp[i2][j3] = Math.min(dp[i2-1][j3] + 1, dp[i2][j3-1] + 1, dp[i2-1][j3-1] + cost);\n    }\n  }\n  return dp[m][n];\n}\n\nfunction similarity(a, b) {\n  var maxLen = Math.max(a.length, b.length);\n  if (maxLen === 0) return 1;\n  return 1 - levenshtein(a, b) / maxLen;\n}\n\n// ── Normalise PDF field name ──\nfunction normalise(name) {\n  return name\n    .replace(/^[A-Z0-9]+-/i, '')\n    .replace(/[_-]/g, ' ')\n    .replace(/\\d+$/g, '')\n    .replace(/[^a-zA-Z0-9 ]/g, '')\n    .toLowerCase()\n    .trim();\n}\n\n// ── Extract section prefix (e.g. A1, B2, Section1) ──\nfunction getSection(name) {\n  var m = name.match(/^([A-Z]\\d+)-/i);\n  return m ? m[1].toUpperCase() : '_root';\n}\n\n// ── Build initial mapping ──\nvar initialMapping = discoverResult.fields.map(function(field) {\n  return {\n    pdfField: field.name,\n    fieldType: field.type,\n    dataKey: '',\n    source: '',\n    confidence: '',\n    score: 0,\n    notes: ''\n  };\n});\n\n// ── Fuzzy matching ──\nvar autoMapped = 0;\nvar sectionKeyUsed = {};\n\nfor (var idx = 0; idx < initialMapping.length; idx++) {\n  var entry = initialMapping[idx];\n  if (entry.fieldType === 'checkbox' || entry.fieldType === 'radio') continue;\n\n  var norm = normalise(entry.pdfField);\n  if (norm.length < MIN_FIELD_LEN) continue;\n\n  var section = getSection(entry.pdfField);\n  var bestScore = 0;\n  var bestField = null;\n\n  for (var fi = 0; fi < userFields.length; fi++) {\n    var uf = userFields[fi];\n    for (var ai = 0; ai < uf.aliases.length; ai++) {\n      var alias = uf.aliases[ai];\n      var score = 0;\n\n      // Exact match after normalisation\n      if (norm === alias) {\n        score = 1.0;\n      } else {\n        // Levenshtein similarity\n        score = similarity(norm, alias);\n      }\n\n      // Contains-match: field contains the alias or alias contains the field\n      if (score < MIN_SCORE && alias.length >= MIN_ALIAS_LEN) {\n        if (norm.indexOf(alias) >= 0 && alias.length >= norm.length * 0.5) {\n          score = Math.max(score, 0.85);\n        } else if (alias.indexOf(norm) >= 0 && norm.length >= alias.length * 0.5) {\n          score = Math.max(score, 0.82);\n        }\n      }\n\n      // Penalise short aliases to avoid false positives\n      if (alias.length < MIN_ALIAS_LEN && score < 1.0) {\n        score = score * 0.7;\n      }\n\n      if (score > bestScore) {\n        bestScore = score;\n        bestField = uf;\n      }\n    }\n  }\n\n  if (bestScore >= MIN_SCORE && bestField) {\n    // Section dedup: only map first occurrence of each dataKey per section\n    var sectionKey = section + ':' + bestField.key;\n    if (!sectionKeyUsed[sectionKey]) {\n      sectionKeyUsed[sectionKey] = true;\n      entry.dataKey = bestField.key;\n      entry.source = bestField.source;\n      entry.score = Math.round(bestScore * 100) / 100;\n      if (bestScore >= 0.95) {\n        entry.confidence = 'high';\n      } else if (bestScore >= 0.85) {\n        entry.confidence = 'medium';\n      } else {\n        entry.confidence = 'low';\n      }\n      entry.notes = 'auto-mapped (fuzzy)';\n      autoMapped++;\n    }\n  }\n}\n\nreturn [{\n  json: {\n    template_ref: config.template_ref,\n    title: config.title,\n    description: config.description,\n    url_link: config.url_link,\n    source_site: config.source_site,\n    version: config.version,\n    input_field_list: {\n      fields: discoverResult.fields,\n      fieldCount: discoverResult.fieldCount\n    },\n    source_to_template_mapping: initialMapping,\n    auto_mapped_count: autoMapped,\n    unmapped_count: initialMapping.length - autoMapped\n  }\n}];"
+        "jsCode": "var config = $('Build Storage URL').item.json;\nvar discoverResult = $('Discover Fields').first().json;\n\n// ── Hand-crafted aliases for core fields (high-quality matches) ──\nvar STATIC_ALIASES = {\n  'first_name': ['first name', 'forename', 'given name', 'firstname', 'applicant name'],\n  'last_name': ['last name', 'surname', 'family name', 'lastname'],\n  'position': ['position', 'job title', 'role'],\n  'phone_number': ['phone number', 'telephone number', 'telephone', 'tel number', 'landline', 'contact number', 'phone'],\n  'email': ['email', 'email address', 'e-mail', 'e mail', 'contact email'],\n  'company_name': ['company', 'company name', 'organisation', 'organization', 'business name'],\n  'company_number': ['company number', 'company no', 'registration number', 'company reg'],\n  'company_address': ['company address', 'business address', 'registered address'],\n  'website': ['website', 'web site', 'url'],\n  'mobile_number': ['mobile', 'mobile number', 'mobile no', 'cell phone', 'mob number'],\n  'postcode': ['postcode', 'post code', 'zip code', 'pcode', 'p code'],\n  'title': ['title', 'salutation', 'prefix']\n};\n\n// ── Load fields dynamically from system_config ──\nvar configResult = $input.first().json;\nvar configRow = Array.isArray(configResult) ? configResult[0] : configResult;\nvar dynamicFields = (configRow && configRow.setting && configRow.setting.fields) || [];\n\n// Build userFields array: merge dynamic fields with static aliases\nvar userFields = [];\nvar seenKeys = {};\n\nfor (var di = 0; di < dynamicFields.length; di++) {\n  var df = dynamicFields[di];\n  var key = df.key;\n  var source = df.source || 'user_details';\n  if (seenKeys[key]) continue;\n  seenKeys[key] = true;\n\n  // Start with static aliases if available\n  var aliases = [];\n  if (STATIC_ALIASES[key]) {\n    for (var sa = 0; sa < STATIC_ALIASES[key].length; sa++) {\n      aliases.push(STATIC_ALIASES[key][sa]);\n    }\n  }\n\n  // Auto-generate aliases from the key itself: site_address → 'site address'\n  var autoAlias = key.replace(/_/g, ' ');\n  if (aliases.indexOf(autoAlias) < 0) {\n    aliases.push(autoAlias);\n  }\n  // Also add the raw key: 'site_address'\n  if (aliases.indexOf(key) < 0) {\n    aliases.push(key);\n  }\n  // For multi-word keys, add individual significant words (4+ chars)\n  var words = autoAlias.split(' ');\n  if (words.length >= 2) {\n    for (var wi = 0; wi < words.length; wi++) {\n      if (words[wi].length >= 5 && aliases.indexOf(words[wi]) < 0) {\n        aliases.push(words[wi]);\n      }\n    }\n  }\n\n  userFields.push({ key: key, source: source, aliases: aliases });\n}\n\nvar fieldCount = userFields.length;\n\nvar MIN_FIELD_LEN = 3;\nvar MIN_SCORE = 0.78;\nvar MIN_ALIAS_LEN = 4;\n\n// ── Levenshtein distance ──\nfunction levenshtein(a, b) {\n  var m = a.length, n = b.length;\n  var dp = [];\n  for (var i = 0; i <= m; i++) {\n    dp[i] = [i];\n    for (var j = 1; j <= n; j++) {\n      dp[i][j] = 0;\n    }\n  }\n  for (var j2 = 0; j2 <= n; j2++) { dp[0][j2] = j2; }\n  for (var i2 = 1; i2 <= m; i2++) {\n    for (var j3 = 1; j3 <= n; j3++) {\n      var cost = (a[i2-1] === b[j3-1]) ? 0 : 1;\n      dp[i2][j3] = Math.min(dp[i2-1][j3] + 1, dp[i2][j3-1] + 1, dp[i2-1][j3-1] + cost);\n    }\n  }\n  return dp[m][n];\n}\n\nfunction similarity(a, b) {\n  var maxLen = Math.max(a.length, b.length);\n  if (maxLen === 0) return 1;\n  return 1 - levenshtein(a, b) / maxLen;\n}\n\n// ── Normalise PDF field name ──\nfunction normalise(name) {\n  var dotParts = name.split('.');\n  name = dotParts[dotParts.length - 1];\n  name = name.replace(/\\[\\d+\\]/g, '');\n  name = name.replace(/^(APP|AD|Agent|DPW|SA|SiteArea|Parking|Trees|Access|Materials|Auth|Dec|COS)_/i, '');\n  name = name.replace(/([a-z])([A-Z])/g, '$1 $2');\n  return name\n    .replace(/^[A-Z0-9]+-/i, '')\n    .replace(/[_-]/g, ' ')\n    .replace(/\\d+$/g, '')\n    .replace(/[^a-zA-Z0-9 ]/g, '')\n    .toLowerCase()\n    .trim();\n}\n\n// ── Extract section prefix ──\nfunction getSection(name) {\n  var dotParts = name.split('.');\n  if (dotParts.length >= 2) {\n    var parent = dotParts[dotParts.length - 2].replace(/\\[\\d+\\]/g, '');\n    return parent;\n  }\n  var m = name.match(/^([A-Z]\\d+)-/i);\n  return m ? m[1].toUpperCase() : '_root';\n}\n\n// ── Build initial mapping ──\nvar initialMapping = discoverResult.fields.map(function(field) {\n  return {\n    pdfField: field.name,\n    fieldType: field.type,\n    dataKey: '',\n    source: '',\n    confidence: '',\n    score: 0,\n    notes: ''\n  };\n});\n\n// ── Fuzzy matching ──\nvar autoMapped = 0;\nvar sectionKeyUsed = {};\n\nfor (var idx = 0; idx < initialMapping.length; idx++) {\n  var entry = initialMapping[idx];\n  if (entry.fieldType === 'checkbox' || entry.fieldType === 'radio') continue;\n\n  var norm = normalise(entry.pdfField);\n  if (norm.length < MIN_FIELD_LEN) continue;\n\n  var section = getSection(entry.pdfField);\n  var bestScore = 0;\n  var bestField = null;\n\n  for (var fi = 0; fi < userFields.length; fi++) {\n    var uf = userFields[fi];\n    for (var ai = 0; ai < uf.aliases.length; ai++) {\n      var alias = uf.aliases[ai];\n      var score = 0;\n\n      if (norm === alias) {\n        score = 1.0;\n      } else {\n        score = similarity(norm, alias);\n      }\n\n      if (score < MIN_SCORE && alias.length >= MIN_ALIAS_LEN) {\n        if (norm.indexOf(alias) >= 0 && alias.length >= norm.length * 0.5) {\n          score = Math.max(score, 0.85);\n        } else if (alias.indexOf(norm) >= 0 && norm.length >= alias.length * 0.5) {\n          score = Math.max(score, 0.82);\n        }\n      }\n\n      if (alias.length < MIN_ALIAS_LEN && score < 1.0) {\n        score = score * 0.7;\n      }\n\n      if (score > bestScore) {\n        bestScore = score;\n        bestField = uf;\n      }\n    }\n  }\n\n  if (bestScore >= MIN_SCORE && bestField) {\n    var sectionKey = section + ':' + bestField.key;\n    if (!sectionKeyUsed[sectionKey]) {\n      sectionKeyUsed[sectionKey] = true;\n      entry.dataKey = bestField.key;\n      entry.source = bestField.source;\n      entry.score = Math.round(bestScore * 100) / 100;\n      if (bestScore >= 0.95) {\n        entry.confidence = 'high';\n      } else if (bestScore >= 0.85) {\n        entry.confidence = 'medium';\n      } else {\n        entry.confidence = 'low';\n      }\n      entry.notes = 'auto-mapped (fuzzy)';\n      autoMapped++;\n    }\n  }\n}\n\nreturn [{\n  json: {\n    template_ref: config.template_ref,\n    title: config.title,\n    description: config.description,\n    url_link: config.url_link,\n    source_site: config.source_site,\n    version: config.version,\n    input_field_list: {\n      fields: discoverResult.fields,\n      fieldCount: discoverResult.fieldCount\n    },\n    source_to_template_mapping: initialMapping,\n    auto_mapped_count: autoMapped,\n    unmapped_count: initialMapping.length - autoMapped,\n    reference_field_count: fieldCount\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1728,
+        1880,
         128
       ],
       "id": "9e5013af-9233-4a58-becd-7f4754f5a3cf",
@@ -171,16 +171,42 @@
     },
     {
       "parameters": {
-        "filePath": "C:\\Users\\gaierr\\Energy_Projects\\projects\\n8n-nodes-pdf-form-filler\\test\\fixtures\\aws-new-water-connection-form-2023-sm.pdf"
+        "method": "GET",
+        "url": "=https://egrzvwnjrtpwwmqzimff.supabase.co/storage/v1/object/panicleDevelop_1/form_runs/master_forms/{{ $json.source_file }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/pdf"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
       },
       "id": "c73ff875-cc3f-46fd-80bc-0743ce04af77",
-      "name": "Read PDF",
-      "type": "n8n-nodes-base.readBinaryFile",
-      "typeVersion": 1,
+      "name": "Download PDF from Bucket",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
       "position": [
         336,
         128
-      ]
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      },
+      "notes": "Downloads PDF from Supabase Storage: form_runs/master_forms/{source_file}"
     },
     {
       "parameters": {
@@ -227,6 +253,39 @@
       ],
       "id": "b9753de5-e1ad-4d9d-8e2a-4340078d250d",
       "name": "No Fields Found"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://egrzvwnjrtpwwmqzimff.supabase.co/rest/v1/system_config?parameter=eq.user_details&limit=1",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1600,
+        128
+      ],
+      "id": "v05-fetch-system-config",
+      "name": "Fetch System Config",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      },
+      "notes": "Fetches registered data fields from system_config to use as fuzzy match reference. Feeds into Build Initial Mapping."
     },
     {
       "parameters": {
@@ -445,7 +504,7 @@
       "main": [
         [
           {
-            "node": "Read PDF",
+            "node": "Download PDF from Bucket",
             "type": "main",
             "index": 0
           }
@@ -456,7 +515,7 @@
       "main": [
         [
           {
-            "node": "Read PDF",
+            "node": "Download PDF from Bucket",
             "type": "main",
             "index": 0
           }
@@ -589,7 +648,7 @@
         ]
       ]
     },
-    "Read PDF": {
+    "Download PDF from Bucket": {
       "main": [
         [
           {
@@ -604,7 +663,7 @@
       "main": [
         [
           {
-            "node": "Build Initial Mapping",
+            "node": "Fetch System Config",
             "type": "main",
             "index": 0
           }
@@ -612,6 +671,17 @@
         [
           {
             "node": "No Fields Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch System Config": {
+      "main": [
+        [
+          {
+            "node": "Build Initial Mapping",
             "type": "main",
             "index": 0
           }

@@ -189,7 +189,7 @@
       },
       "type": "n8n-nodes-pdf-form-filler.pdfFormFiller",
       "typeVersion": 1,
-      "position": [800, 120],
+      "position": [880, 120],
       "id": "ff-fill-form",
       "name": "Fill Form"
     },

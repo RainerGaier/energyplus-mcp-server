@@ -7,7 +7,7 @@
       "typeVersion": 1,
       "position": [
         -400,
-        0
+        -120
       ],
       "id": "ued-manual-trigger",
       "name": "Manual Trigger"
@@ -15,48 +15,96 @@
     {
       "parameters": {
         "mode": "raw",
-        "jsonOutput": "={\n  \"file_path\": \"C:\\\\Users\\\\gaierr\\\\.n8n-files\\\\TEF-001-Extended-info-f24ee278-fb1e-42dc-8777-ac9af1954d25.xlsx\"\n}",
+        "jsonOutput": "={\n  \"template_ref\": \"TEF-001\",\n  \"user_id\": \"f24ee278-fb1e-42dc-8777-ac9af1954d25\",\n  \"SUPABASE_URL\": \"https://egrzvwnjrtpwwmqzimff.supabase.co\",\n  \"SUPABASE_BUCKET\": \"panicleDevelop_1\"\n}",
         "options": {}
       },
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
         -160,
-        0
+        -120
       ],
       "id": "ued-default-params",
       "name": "Default Params",
-      "notes": "Edit file_path to point to the completed Extended Info Excel file.\nFilename format: {template_ref}-Extended-info-{user_id}.xlsx"
+      "notes": "Edit template_ref and user_id.\nThe workflow downloads {template_ref}_extended_info.xlsx from Supabase storage."
     },
     {
       "parameters": {
-        "filePath": "={{ $json.file_path }}"
+        "httpMethod": "POST",
+        "path": "update-extended-data",
+        "responseMode": "lastNode",
+        "options": {}
       },
-      "type": "n8n-nodes-base.readBinaryFile",
-      "typeVersion": 1,
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
       "position": [
-        80,
-        0
+        -400,
+        120
       ],
-      "id": "ued-read-file",
-      "name": "Read Binary File"
+      "id": "ued-webhook-trigger",
+      "name": "Webhook Trigger",
+      "webhookId": "update-extended-data"
     },
     {
       "parameters": {
-        "jsCode": "var item = $input.first();\nvar fileName = '';\n\nif (item.binary && item.binary.data) {\n  fileName = item.binary.data.fileName || '';\n}\n\nif (!fileName) {\n  var filePath = $('Default Params').first().json.file_path || '';\n  var parts = filePath.replace(/\\\\/g, '/').split('/');\n  fileName = parts[parts.length - 1];\n}\n\nif (!fileName) {\n  throw new Error('Could not determine filename from input');\n}\n\nvar baseName = fileName.replace('.xlsx', '').replace('.XLSX', '');\n\nvar marker = '-Extended-info-';\nvar markerIdx = baseName.indexOf(marker);\n\nif (markerIdx === -1) {\n  throw new Error('Invalid filename format: \"' + fileName + '\". Expected: {template_ref}-Extended-info-{user_id}.xlsx');\n}\n\nvar templateRef = baseName.substring(0, markerIdx);\nvar userId = baseName.substring(markerIdx + marker.length);\n\nif (!templateRef) {\n  throw new Error('Could not extract template_ref from filename: ' + fileName);\n}\nif (!userId) {\n  throw new Error('Could not extract user_id from filename: ' + fileName);\n}\n\nreturn [{\n  json: {\n    template_ref: templateRef,\n    user_id: userId,\n    original_filename: fileName\n  },\n  binary: item.binary\n}];"
+        "mode": "raw",
+        "jsonOutput": "={\n  \"template_ref\": \"{{ $json.body.template_ref || '' }}\",\n  \"user_id\": \"{{ $json.body.user_id || '' }}\",\n  \"SUPABASE_URL\": \"{{ $json.body.supabase_url || 'https://egrzvwnjrtpwwmqzimff.supabase.co' }}\",\n  \"SUPABASE_BUCKET\": \"{{ $json.body.supabase_bucket || 'panicleDevelop_1' }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -160,
+        120
+      ],
+      "id": "ued-extract-webhook",
+      "name": "Extract Webhook Params"
+    },
+    {
+      "parameters": {
+        "jsCode": "var params = $input.first().json;\n\nif (!params.template_ref) {\n  throw new Error('Missing required field: template_ref');\n}\nif (!params.user_id) {\n  throw new Error('Missing required field: user_id');\n}\n\nvar uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nif (!uuidPattern.test(params.user_id)) {\n  throw new Error('Invalid user_id format: \"' + params.user_id + '\". Expected UUID format (e.g. 4a62ed11-6360-41fe-81fb-72f711f23f4b)');\n}\n\nvar supabaseUrl = params.SUPABASE_URL || 'https://egrzvwnjrtpwwmqzimff.supabase.co';\nvar bucket = params.SUPABASE_BUCKET || 'panicleDevelop_1';\nvar fileName = params.template_ref + '_extended_info.xlsx';\nvar downloadUrl = supabaseUrl + '/storage/v1/object/' + bucket + '/PDF-templates/' + params.template_ref + '/' + fileName;\n\nreturn [{\n  json: {\n    template_ref: params.template_ref,\n    user_id: params.user_id,\n    SUPABASE_URL: supabaseUrl,\n    SUPABASE_BUCKET: bucket,\n    download_url: downloadUrl,\n    original_filename: fileName\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        320,
+        80,
         0
       ],
-      "id": "ued-parse-filename",
-      "name": "Parse Filename"
+      "id": "ued-validate-params",
+      "name": "Validate Params"
     },
     {
       "parameters": {
-        "jsCode": "var data = $input.first().json;\nvar userId = data.user_id;\n\nvar uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\n\nif (!uuidPattern.test(userId)) {\n  throw new Error('Invalid user_id format: \"' + userId + '\". Expected UUID format (e.g. 4a62ed11-6360-41fe-81fb-72f711f23f4b)');\n}\n\nreturn [{\n  json: {\n    template_ref: data.template_ref,\n    user_id: userId,\n    original_filename: data.original_filename,\n    SUPABASE_URL: 'https://egrzvwnjrtpwwmqzimff.supabase.co'\n  },\n  binary: $input.first().binary\n}];"
+        "url": "={{ $json.download_url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        0
+      ],
+      "id": "ued-download-excel",
+      "name": "Download Extended Info Excel",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var item = $input.first();\nvar config = $('Validate Params').first().json;\n\nvar hasBinary = false;\nif (item.binary) {\n  var keys = Object.keys(item.binary);\n  if (keys.length > 0) { hasBinary = true; }\n}\n\nif (!hasBinary) {\n  throw new Error('Extended Info Excel not found in Supabase storage. Expected path: PDF-templates/' + config.template_ref + '/' + config.template_ref + '_extended_info.xlsx. Run Add Form Template v0.5 first, then upload the edited file to Supabase.');\n}\n\nreturn [{\n  json: {\n    template_ref: config.template_ref,\n    user_id: config.user_id,\n    original_filename: config.original_filename,\n    SUPABASE_URL: config.SUPABASE_URL\n  },\n  binary: item.binary\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -64,8 +112,8 @@
         560,
         0
       ],
-      "id": "ued-validate-uuid",
-      "name": "Validate UUID"
+      "id": "ued-check-download",
+      "name": "Check Download Result"
     },
     {
       "parameters": {
@@ -82,7 +130,7 @@
     },
     {
       "parameters": {
-        "jsCode": "var rows = $input.all();\nvar config = $('Validate UUID').first().json;\nvar newDataKeys = {};\nvar parseErrors = [];\nvar rowsParsed = 0;\n\nfor (var i = 0; i < rows.length; i++) {\n  var row = rows[i].json;\n  var pdfField = row['PDF Field Name'] || '';\n  var extSource = row['Extended data source'] || '';\n  var extValue = row['Extended data value'];\n\n  if (!extSource || String(extSource).trim() === '') {\n    continue;\n  }\n  if (extValue === undefined || extValue === null || String(extValue).trim() === '') {\n    continue;\n  }\n\n  var trimmedSource = String(extSource).trim();\n  var bracketIdx = trimmedSource.indexOf('[');\n\n  if (bracketIdx === -1) {\n    parseErrors.push('Row ' + (i + 2) + ' (' + pdfField + '): Column D missing [source]. Expected format: data_key [user_details]');\n    continue;\n  }\n\n  var dataKey = trimmedSource.substring(0, bracketIdx).trim();\n  var closeBracket = trimmedSource.indexOf(']', bracketIdx);\n  var source = '';\n\n  if (closeBracket >= 0) {\n    source = trimmedSource.substring(bracketIdx + 1, closeBracket).trim();\n  }\n\n  if (source !== 'user_details') {\n    parseErrors.push('Row ' + (i + 2) + ' (' + pdfField + '): Source must be [user_details], got [' + source + ']');\n    continue;\n  }\n\n  var validKeyPattern = /^[a-z][a-z0-9_]*$/;\n  if (!validKeyPattern.test(dataKey)) {\n    parseErrors.push('Row ' + (i + 2) + ' (' + pdfField + '): Invalid data_key \"' + dataKey + '\". Must be lowercase letters, numbers, underscores, starting with a letter.');\n    continue;\n  }\n\n  newDataKeys[dataKey] = String(extValue).trim();\n  rowsParsed++;\n}\n\nif (parseErrors.length > 0) {\n  throw new Error('Parse errors found:\\n' + parseErrors.join('\\n'));\n}\n\nvar keysList = Object.keys(newDataKeys);\n\nif (keysList.length === 0) {\n  throw new Error('No data keys found in Excel file. Ensure columns D and E are filled for at least one row.');\n}\n\nreturn [{\n  json: {\n    template_ref: config.template_ref,\n    user_id: config.user_id,\n    details_jsonb: newDataKeys,\n    keys_list: keysList,\n    keys_count: keysList.length,\n    SUPABASE_URL: config.SUPABASE_URL\n  }\n}];"
+        "jsCode": "var rows = $input.all();\nvar config = $('Check Download Result').first().json;\nvar newDataKeys = {};\nvar parseErrors = [];\nvar rowsParsed = 0;\n\nfor (var i = 0; i < rows.length; i++) {\n  var row = rows[i].json;\n  var pdfField = row['PDF Field Name'] || '';\n  var extSource = row['Extended data source'] || '';\n  var extValue = row['Extended data value'];\n\n  if (!extSource || String(extSource).trim() === '') {\n    continue;\n  }\n  if (extValue === undefined || extValue === null || String(extValue).trim() === '') {\n    continue;\n  }\n\n  var trimmedSource = String(extSource).trim();\n  var openBracket = trimmedSource.indexOf('[');\n  var closeBracket = trimmedSource.indexOf(']');\n\n  if (openBracket === -1 || closeBracket === -1) {\n    parseErrors.push('Row ' + (i + 2) + ' (' + pdfField + '): Column D missing [source]. Expected format: data_key [user_details] or [user_details]data_key');\n    continue;\n  }\n\n  var source = trimmedSource.substring(openBracket + 1, closeBracket).trim();\n  var dataKey = '';\n\n  if (openBracket === 0) {\n    dataKey = trimmedSource.substring(closeBracket + 1).trim();\n  } else {\n    dataKey = trimmedSource.substring(0, openBracket).trim();\n  }\n\n  if (source.toLowerCase() !== 'user_details') {\n    parseErrors.push('Row ' + (i + 2) + ' (' + pdfField + '): Source must be [user_details], got [' + source + ']');\n    continue;\n  }\n\n  dataKey = dataKey.toLowerCase();\n\n  var validKeyPattern = /^[a-z][a-z0-9_]*$/;\n  if (!validKeyPattern.test(dataKey)) {\n    parseErrors.push('Row ' + (i + 2) + ' (' + pdfField + '): Invalid data_key \"' + dataKey + '\". Must be letters, numbers, underscores, starting with a letter.');\n    continue;\n  }\n\n  newDataKeys[dataKey] = String(extValue).trim();\n  rowsParsed++;\n}\n\nif (parseErrors.length > 0) {\n  throw new Error('Parse errors found:\\n' + parseErrors.join('\\n'));\n}\n\nvar keysList = Object.keys(newDataKeys);\n\nif (keysList.length === 0) {\n  throw new Error('No data keys found in Excel file. Ensure columns D and E are filled for at least one row.');\n}\n\nreturn [{\n  json: {\n    template_ref: config.template_ref,\n    user_id: config.user_id,\n    details_jsonb: newDataKeys,\n    keys_list: keysList,\n    keys_count: keysList.length,\n    SUPABASE_URL: config.SUPABASE_URL\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -158,40 +206,62 @@
         ]
       ]
     },
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Webhook Params",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Default Params": {
       "main": [
         [
           {
-            "node": "Read Binary File",
+            "node": "Validate Params",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Read Binary File": {
+    "Extract Webhook Params": {
       "main": [
         [
           {
-            "node": "Parse Filename",
+            "node": "Validate Params",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Parse Filename": {
+    "Validate Params": {
       "main": [
         [
           {
-            "node": "Validate UUID",
+            "node": "Download Extended Info Excel",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Validate UUID": {
+    "Download Extended Info Excel": {
+      "main": [
+        [
+          {
+            "node": "Check Download Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Download Result": {
       "main": [
         [
           {
@@ -238,7 +308,8 @@
   },
   "active": false,
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "binaryMode": "separate"
   },
   "versionId": "v0.1-2026-02-20",
   "meta": {
