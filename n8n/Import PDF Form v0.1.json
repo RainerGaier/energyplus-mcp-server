@@ -1,0 +1,1405 @@
+{
+  "name": "Import PDF Form v0.1 (Grandioso)",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-800, -120],
+      "id": "ipf-manual-trigger",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"run_id\": \"Import-{{ $now.format('yyyy-MM-dd_HH-mm') }}\",\n  \"template_ref\": \"APP-001\",\n  \"user_id\": \"f24ee278-fb1e-42dc-8777-ac9af1954d25\",\n  \"title\": \"UK Planning Application (1APP)\",\n  \"description\": \"Standard planning application form for England\",\n  \"pdf_storage_path\": \"PDF-templates/APP-001/G2625Form004_england_en.pdf\",\n  \"start_from_step\": 1,\n  \"SUPABASE_URL\": \"https://egrzvwnjrtpwwmqzimff.supabase.co\",\n  \"SUPABASE_BUCKET\": \"panicleDevelop_1\",\n  \"config\": {\n    \"min_score\": 0.70,\n    \"domain_context\": \"UK planning application form submission\",\n    \"openai_api_key\": \"\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-560, -120],
+      "id": "ipf-default-params",
+      "name": "Default Params",
+      "notes": "Edit ALL fields before running.\n- template_ref: the reference ID for this template\n- pdf_storage_path: path in Supabase storage (upload PDF first)\n- start_from_step: set to 1 for new, or 2-6 to resume\n- config.openai_api_key: required for step 5 (Path B)"
+    },
+    {
+      "parameters": {
+        "jsCode": "var params = $input.first().json;\n\nvar runId = params.run_id;\nvar templateRef = params.template_ref;\nvar userId = params.user_id;\nvar startStep = params.start_from_step || 1;\nvar title = params.title || templateRef;\nvar description = params.description || '';\nvar pdfPath = params.pdf_storage_path || '';\nvar supabaseUrl = params.SUPABASE_URL || 'https://egrzvwnjrtpwwmqzimff.supabase.co';\nvar bucket = params.SUPABASE_BUCKET || 'panicleDevelop_1';\nvar config = params.config || {};\n\nif (!templateRef) {\n  throw new Error('Missing required field: template_ref');\n}\nif (!userId) {\n  throw new Error('Missing required field: user_id');\n}\nvar uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nif (!uuidPattern.test(userId)) {\n  throw new Error('Invalid user_id format: \"' + userId + '\". Expected UUID.');\n}\nif (startStep === 1 && !pdfPath) {\n  throw new Error('Missing pdf_storage_path. Upload the PDF to Supabase first, then provide the path.');\n}\nif (startStep < 1 || startStep > 6) {\n  throw new Error('start_from_step must be 1-6. Got: ' + startStep);\n}\n\nreturn [{\n  json: {\n    run_id: runId,\n    template_ref: templateRef,\n    user_id: userId,\n    start_from_step: startStep,\n    title: title,\n    description: description,\n    pdf_storage_path: pdfPath,\n    SUPABASE_URL: supabaseUrl,\n    SUPABASE_BUCKET: bucket,\n    config: config\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-320, 0],
+      "id": "ipf-validate",
+      "name": "Validate Params"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.SUPABASE_URL }}/rest/v1/pipeline_runs",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "resolution=merge-duplicates,return=representation" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ run_id: $json.run_id, template_ref: $json.template_ref, user_id: $json.user_id, current_step: $json.start_from_step, status: 'running', config: $json.config, started_at: new Date().toISOString(), updated_at: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-80, 0],
+      "id": "ipf-upsert-state",
+      "name": "Init Pipeline State",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var params = $('Validate Params').first().json;\nvar stateResult = $input.first().json;\nvar state = Array.isArray(stateResult) ? stateResult[0] : stateResult;\n\nvar stepsCompleted = state.steps_completed || [];\nvar currentStep = state.current_step || params.start_from_step || 1;\n\nreturn [{\n  json: {\n    run_id: params.run_id,\n    template_ref: params.template_ref,\n    user_id: params.user_id,\n    title: params.title,\n    description: params.description,\n    pdf_storage_path: params.pdf_storage_path,\n    SUPABASE_URL: params.SUPABASE_URL,\n    SUPABASE_BUCKET: params.SUPABASE_BUCKET,\n    config: params.config,\n    current_step: currentStep,\n    steps_completed: stepsCompleted,\n    path: state.path || 'undecided',\n    step_results: state.step_results || {}\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [160, 0],
+      "id": "ipf-prepare-route",
+      "name": "Prepare Route"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "route-step-1",
+              "leftValue": "={{ $json.current_step }}",
+              "rightValue": 1,
+              "operator": {
+                "type": "number",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [400, 0],
+      "id": "ipf-is-step1",
+      "name": "Is Step 1?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "route-step-2",
+              "leftValue": "={{ $json.current_step }}",
+              "rightValue": 2,
+              "operator": {
+                "type": "number",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [400, 200],
+      "id": "ipf-is-step2",
+      "name": "Is Step 2?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "route-step-3",
+              "leftValue": "={{ $json.current_step }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [400, 400],
+      "id": "ipf-is-step3",
+      "name": "Is Step 3?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "route-step-4",
+              "leftValue": "={{ $json.current_step }}",
+              "rightValue": 4,
+              "operator": {
+                "type": "number",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [400, 600],
+      "id": "ipf-is-step4",
+      "name": "Is Step 4?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "route-step-5",
+              "leftValue": "={{ $json.current_step }}",
+              "rightValue": 5,
+              "operator": {
+                "type": "number",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [400, 800],
+      "id": "ipf-is-step5",
+      "name": "Is Step 5?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "route-step-6",
+              "leftValue": "={{ $json.current_step }}",
+              "rightValue": 6,
+              "operator": {
+                "type": "number",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [400, 1000],
+      "id": "ipf-is-step6",
+      "name": "Is Step 6?"
+    },
+    {
+      "parameters": {
+        "jsCode": "var state = $input.first().json;\nvar stepsCompleted = state.steps_completed || [];\n\nif (stepsCompleted.indexOf(1) >= 0) {\n  return [{ json: Object.assign({}, state, { _skip: true, _msg: 'Step 1 already completed — skipping to step 2' }) }];\n}\n\nreturn [{ json: Object.assign({}, state, { _skip: false }) }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, -500],
+      "id": "ipf-check-step1",
+      "name": "Check Step 1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "skip-check",
+              "leftValue": "={{ $json._skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [940, -500],
+      "id": "ipf-if-skip1",
+      "name": "Skip Step 1?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:5678/webhook/add-form-template",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ run_id: $json.run_id, template_ref: $json.template_ref, title: $json.title, description: $json.description, pdf_storage_path: $json.pdf_storage_path }) }}",
+        "options": { "timeout": 120000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1180, -600],
+      "id": "ipf-call-step1",
+      "name": "Call: Add Form Template"
+    },
+    {
+      "parameters": {
+        "jsCode": "var state = $('Check Step 1').first().json;\nvar result = $input.first().json;\n\nvar isError = false;\nvar errorMsg = '';\nif (result.statusCode && result.statusCode >= 400) {\n  isError = true;\n  errorMsg = result.message || JSON.stringify(result);\n} else if (result.status === 'error') {\n  isError = true;\n  errorMsg = result.message || 'Unknown error in Add Form Template';\n}\n\nvar stepResult = {\n  status: isError ? 'error' : 'success',\n  auto_mapped: result.auto_mapped_count || result.mapped_count || 0,\n  unmapped: result.unmapped_count || 0,\n  total_fields: result.total_fields || result.field_count || 0,\n  error: errorMsg\n};\n\nreturn [{\n  json: Object.assign({}, state, {\n    step1_result: stepResult,\n    step1_error: isError,\n    step1_error_msg: errorMsg\n  })\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1420, -600],
+      "id": "ipf-check-step1-result",
+      "name": "Check Step 1 Result"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "error-check",
+              "leftValue": "={{ $json.step1_error }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1660, -600],
+      "id": "ipf-if-step1-error",
+      "name": "Step 1 Error?"
+    },
+    {
+      "parameters": {
+        "jsCode": "var state = $input.first().json;\nreturn [{\n  json: {\n    status: 'failed',\n    failed_at_step: 1,\n    step_name: 'Add Form Template',\n    error: state.step1_error_msg,\n    run_id: state.run_id,\n    template_ref: state.template_ref,\n    recovery: 'Fix the issue and re-run with start_from_step=1'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1900, -720],
+      "id": "ipf-step1-fail",
+      "name": "Step 1 Failed"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Validate Params').first().json.SUPABASE_URL }}/rest/v1/pipeline_runs?run_id=eq.{{ $json.run_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'failed', last_error: $json.error, updated_at: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2140, -720],
+      "id": "ipf-update-fail",
+      "name": "Update State: Failed",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Validate Params').first().json.SUPABASE_URL }}/rest/v1/pipeline_runs?run_id=eq.{{ $('Check Step 1').first().json.run_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ steps_completed: JSON.parse(JSON.stringify($('Check Step 1').first().json.steps_completed || [])).concat([1]), step_results: Object.assign({}, $('Check Step 1').first().json.step_results, { '1': $json.step1_result }), status: 'paused', current_step: 1, updated_at: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1900, -480],
+      "id": "ipf-mark-step1-done",
+      "name": "Mark Step 1 Done",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resume": "form",
+        "formTitle": "=STEP 1 COMPLETE — Review Mapping Files ({{ $('Check Step 1').first().json.template_ref }})",
+        "formDescription": "=You are at: STEP 1 of 6 — Add Form Template\nStatus: PAUSED — waiting for your input\nTemplate: {{ $('Check Step 1').first().json.template_ref }} — {{ $('Check Step 1').first().json.title }}\nFields discovered: {{ $json.step1_result.total_fields || 'see workflow output' }}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nWHAT YOU NEED TO DO:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n1. Go to Supabase Storage → panicleDevelop_1 → PDF-templates/{{ $('Check Step 1').first().json.template_ref }}/\n\n2. MAPPING EXCEL ({{ $('Check Step 1').first().json.template_ref }}_mapping.xlsx):\n   • Download the file\n   • Review columns C-E (auto-mapped fields, confidence, score)\n   • Edit COLUMN F (Manual Override) to correct any wrong mappings\n   • Format: data_key [source]  e.g. mobile_number [user_details]\n   • Leave column F blank if the auto-mapping in column C is correct\n   • Upload the edited file back to the same folder\n\n3. EXTENDED INFO EXCEL ({{ $('Check Step 1').first().json.template_ref }}_extended_info.xlsx):\n   • Download the file (contains unmapped fields)\n   • Fill COLUMN D (Extended data source): data_key [user_details]\n   • Fill COLUMN E (Extended data value): the actual value\n   • Upload the edited file back to the same folder\n\n4. Choose your pipeline path below:\n   • Path A (Simple): Use if you've manually mapped all fields and provided all values\n   • Path B (Full): Use if you want the system to auto-generate missing data via AI\n\n5. Click Submit when both files are uploaded",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Path Choice",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  { "option": "path_b — Full pipeline (gap analysis + synthetic + realistic data)" },
+                  { "option": "path_a — Simple (manual mapping + extended data only)" }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2140, -480],
+      "id": "ipf-wait-step1",
+      "name": "Wait: Review Mapping"
+    },
+    {
+      "parameters": {
+        "jsCode": "var formData = $input.first().json;\nvar state = $('Check Step 1').first().json;\n\nvar pathChoice = (formData['Path Choice'] || '').toLowerCase();\nvar path = 'path_b';\nif (pathChoice.indexOf('path_a') >= 0) {\n  path = 'path_a';\n}\n\nvar nextStep = (path === 'path_a') ? 2 : 2;\n\nreturn [{\n  json: Object.assign({}, state, {\n    path: path,\n    current_step: 2,\n    steps_completed: (state.steps_completed || []).concat([1])\n  })\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2380, -480],
+      "id": "ipf-process-step1-resume",
+      "name": "Process Step 1 Resume"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Validate Params').first().json.SUPABASE_URL }}/rest/v1/pipeline_runs?run_id=eq.{{ $json.run_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ current_step: 2, status: 'running', path: $json.path, updated_at: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2620, -480],
+      "id": "ipf-update-to-step2",
+      "name": "Update State: Step 2",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:5678/webhook/allocate-form-mapping",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ template_ref: $('Process Step 1 Resume').first().json.template_ref }) }}",
+        "options": { "timeout": 120000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2860, -480],
+      "id": "ipf-call-step2",
+      "name": "Call: Allocate Mapping"
+    },
+    {
+      "parameters": {
+        "jsCode": "var state = $('Process Step 1 Resume').first().json;\nvar result = $input.first().json;\n\nvar isError = (result.statusCode && result.statusCode >= 400) || result.status === 'error';\nif (isError) {\n  return [{\n    json: {\n      status: 'failed',\n      failed_at_step: 2,\n      step_name: 'Allocate Form Mapping',\n      error: result.message || JSON.stringify(result),\n      run_id: state.run_id,\n      template_ref: state.template_ref,\n      recovery: 'Fix the issue and re-run with start_from_step=2'\n    }\n  }];\n}\n\nvar nextStep = (state.path === 'path_a') ? 'step3a' : 'step3b';\n\nreturn [{\n  json: Object.assign({}, state, {\n    steps_completed: (state.steps_completed || []).concat([2]),\n    step2_result: { status: 'success', overrides: result.overrides_applied || 0 },\n    _next: nextStep\n  })\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3100, -480],
+      "id": "ipf-check-step2-result",
+      "name": "Check Step 2 Result"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "path-check",
+              "leftValue": "={{ $json._next }}",
+              "rightValue": "step3a",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [3340, -480],
+      "id": "ipf-route-path",
+      "name": "Path A or B?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:5678/webhook/update-extended-data",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ template_ref: $json.template_ref, user_id: $json.user_id }) }}",
+        "options": { "timeout": 120000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3580, -600],
+      "id": "ipf-call-step3a",
+      "name": "Call: Update Extended Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "var state = $('Check Step 2 Result').first().json;\nvar result = $input.first().json;\n\nvar isError = (result.statusCode && result.statusCode >= 400) || result.status === 'error';\nif (isError) {\n  return [{\n    json: {\n      status: 'failed',\n      failed_at_step: 3,\n      step_name: 'Update Extended Data (Path A)',\n      error: result.message || JSON.stringify(result),\n      run_id: state.run_id,\n      recovery: 'Fix the issue and re-run with start_from_step=3'\n    }\n  }];\n}\n\nreturn [{\n  json: Object.assign({}, state, {\n    steps_completed: (state.steps_completed || []).concat([3]),\n    current_step: 6,\n    step3a_result: { status: 'success', keys_updated: result.keys_count || 0 }\n  })\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3820, -600],
+      "id": "ipf-check-step3a-result",
+      "name": "Check Step 3a Result"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:5678/webhook/analyse-form-gaps",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ template_ref: $json.template_ref, min_score: ($json.config && $json.config.min_score) || 0.70 }) }}",
+        "options": { "timeout": 120000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3580, -360],
+      "id": "ipf-call-step3b",
+      "name": "Call: Analyse Form Gaps"
+    },
+    {
+      "parameters": {
+        "jsCode": "var state = $('Check Step 2 Result').first().json;\nvar result = $input.first().json;\n\nvar isError = (result.statusCode && result.statusCode >= 400) || result.status === 'error';\nif (isError) {\n  return [{\n    json: {\n      status: 'failed',\n      failed_at_step: 3,\n      step_name: 'Analyse Form Gaps (Path B)',\n      error: result.message || JSON.stringify(result),\n      run_id: state.run_id,\n      recovery: 'Fix the issue and re-run with start_from_step=3'\n    }\n  }];\n}\n\nreturn [{\n  json: Object.assign({}, state, {\n    steps_completed: (state.steps_completed || []).concat([3]),\n    step3b_result: { status: 'success', unmapped: result.overall ? result.overall.total_unmapped : 0, suggestions: result.overall ? result.overall.total_suggestions_found : 0, excel_path: result.excel_path || '' }\n  })\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3820, -360],
+      "id": "ipf-check-step3b-result",
+      "name": "Check Step 3b Result"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Validate Params').first().json.SUPABASE_URL }}/rest/v1/pipeline_runs?run_id=eq.{{ $json.run_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ steps_completed: $json.steps_completed, current_step: 3, status: 'paused', updated_at: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [4060, -360],
+      "id": "ipf-mark-step3b-done",
+      "name": "Mark Step 3b Done",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resume": "form",
+        "formTitle": "=STEP 3 COMPLETE — Review Gap Analysis ({{ $('Check Step 3b Result').first().json.template_ref }})",
+        "formDescription": "=You are at: STEP 3 of 6 — Analyse Form Gaps (Path B)\nStatus: PAUSED — waiting for your input\nTemplate: {{ $('Check Step 3b Result').first().json.template_ref }}\nUnmapped fields: {{ $('Check Step 3b Result').first().json.step3b_result.unmapped }}\nSuggestions found: {{ $('Check Step 3b Result').first().json.step3b_result.suggestions }}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nWHAT YOU NEED TO DO:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n1. Go to Supabase Storage → panicleDevelop_1 → gap-reports/\n2. Download the gap report Excel file\n3. For each unmapped field you want the system to auto-generate data for:\n   • Add a column called 'Create Data'\n   • Set its value to TRUE for fields you want generated\n   • Or enter a literal value directly if you know it\n4. Save the file as Generate_Data.xlsx\n5. Upload to: PDF-templates/{{ $('Check Step 3b Result').first().json.template_ref }}/Generate_Data.xlsx\n\nNEXT STEPS after you click Submit:\n   Step 4: Generate Synthetic Data (auto)\n   Step 5: Generate Realistic Data via AI (auto)\n   Step 6: Fill PDF Form (auto)\n\n6. Select your action below and click Submit",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Confirmation",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  { "option": "Generate_Data.xlsx uploaded and ready — continue pipeline" },
+                  { "option": "Abort pipeline" }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [4300, -360],
+      "id": "ipf-wait-step3b",
+      "name": "Wait: Review Gap Report"
+    },
+    {
+      "parameters": {
+        "jsCode": "var formData = $input.first().json;\nvar state = $('Check Step 3b Result').first().json;\n\nvar confirmation = formData['Confirmation'] || '';\nif (confirmation.toLowerCase().indexOf('abort') >= 0) {\n  return [{\n    json: {\n      status: 'aborted',\n      aborted_at_step: 3,\n      run_id: state.run_id,\n      template_ref: state.template_ref,\n      message: 'Pipeline aborted by user after gap analysis.'\n    }\n  }];\n}\n\nreturn [{\n  json: Object.assign({}, state, {\n    current_step: 4\n  })\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4540, -360],
+      "id": "ipf-process-step3b-resume",
+      "name": "Process Step 3b Resume"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "abort-check",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "aborted",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [4780, -360],
+      "id": "ipf-if-aborted",
+      "name": "Aborted?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:5678/webhook/generate-synthetic-data",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ template_ref: $json.template_ref, user_id: $json.user_id }) }}",
+        "options": { "timeout": 120000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [5020, -480],
+      "id": "ipf-call-step4",
+      "name": "Call: Generate Synthetic"
+    },
+    {
+      "parameters": {
+        "jsCode": "var state = $('Process Step 3b Resume').first().json;\nvar result = $input.first().json;\n\nvar isError = (result.statusCode && result.statusCode >= 400) || result.status === 'error';\nif (isError) {\n  return [{\n    json: {\n      status: 'failed',\n      failed_at_step: 4,\n      step_name: 'Generate Synthetic Data',\n      error: result.message || JSON.stringify(result),\n      run_id: state.run_id,\n      recovery: 'Fix the issue and re-run with start_from_step=4'\n    }\n  }];\n}\n\nreturn [{\n  json: Object.assign({}, state, {\n    steps_completed: (state.steps_completed || []).concat([4]),\n    current_step: 5,\n    step4_result: { status: 'success', fields_created: result.fields_created || 0, synthetic_keys: result.synthetic_data_keys || [] }\n  })\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [5260, -480],
+      "id": "ipf-check-step4-result",
+      "name": "Check Step 4 Result"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:5678/webhook/generate-realistic-data",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ template_ref: $json.template_ref, user_id: $json.user_id, openai_api_key: ($json.config && $json.config.openai_api_key) || '', domain_context: ($json.config && $json.config.domain_context) || 'a UK regulatory form submission' }) }}",
+        "options": { "timeout": 120000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [6340, -480],
+      "id": "ipf-call-step5",
+      "name": "Call: Generate Realistic"
+    },
+    {
+      "parameters": {
+        "jsCode": "var state = $('Check Step 4 Result').first().json;\nvar result = $input.first().json;\n\nvar isError = (result.statusCode && result.statusCode >= 400) || result.status === 'error';\nif (isError) {\n  return [{\n    json: {\n      status: 'failed',\n      failed_at_step: 5,\n      step_name: 'Generate Realistic Data',\n      error: result.message || JSON.stringify(result),\n      run_id: state.run_id,\n      recovery: 'Fix the issue and re-run with start_from_step=5. Ensure config.openai_api_key is set.'\n    }\n  }];\n}\n\nreturn [{\n  json: Object.assign({}, state, {\n    steps_completed: (state.steps_completed || []).concat([5]),\n    current_step: 6,\n    step5_result: { status: result.status || 'success', fields_updated: result.fields_updated || 0 }\n  })\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [6580, -480],
+      "id": "ipf-check-step5-result",
+      "name": "Check Step 5 Result"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:5678/webhook/fill-form",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ run_id: $json.run_id, template_ref: $json.template_ref, user_id: $json.user_id, additional_data: {} }) }}",
+        "options": { "timeout": 120000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [6820, -480],
+      "id": "ipf-call-step6-b",
+      "name": "Call: Fill Form (B)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:5678/webhook/fill-form",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ run_id: $json.run_id, template_ref: $json.template_ref, user_id: $json.user_id, additional_data: {} }) }}",
+        "options": { "timeout": 120000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [4060, -600],
+      "id": "ipf-call-step6-a",
+      "name": "Call: Fill Form (A)"
+    },
+    {
+      "parameters": {
+        "jsCode": "var result = $input.first().json;\nvar runId = '';\nvar templateRef = '';\nvar path = '';\n\n// Determine which path we came from\ntry { runId = $('Validate Params').first().json.run_id; } catch(e) {}\ntry { templateRef = $('Validate Params').first().json.template_ref; } catch(e) {}\n\nvar isError = (result.statusCode && result.statusCode >= 400) || result.status === 'error';\nif (isError) {\n  return [{\n    json: {\n      status: 'failed',\n      failed_at_step: 6,\n      step_name: 'Fill Form',\n      error: result.message || JSON.stringify(result),\n      run_id: runId,\n      template_ref: templateRef,\n      recovery: 'Fix the issue and re-run with start_from_step=6'\n    }\n  }];\n}\n\nvar fillResult = {\n  status: result.status || 'success',\n  fields_filled: result.fields_filled || 0,\n  fields_missing: result.fields_missing || 0,\n  warnings: result.warnings || [],\n  final_pdf: result.final_pdf || result.final_pdf_path || ''\n};\n\nreturn [{\n  json: {\n    status: 'completed',\n    run_id: runId,\n    template_ref: templateRef,\n    fill_result: fillResult\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [7060, -480],
+      "id": "ipf-check-fill-result",
+      "name": "Check Fill Result"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Validate Params').first().json.SUPABASE_URL }}/rest/v1/pipeline_runs?run_id=eq.{{ $json.run_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: $json.status === 'completed' ? 'completed' : 'failed', current_step: 6, completed_at: $json.status === 'completed' ? new Date().toISOString() : null, last_error: $json.status === 'failed' ? $json.error : null, updated_at: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [7300, -480],
+      "id": "ipf-update-final",
+      "name": "Update State: Final",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var finalState = $('Check Fill Result').first().json;\n\nif (finalState.status === 'completed') {\n  return [{\n    json: {\n      status: 'completed',\n      message: 'Pipeline completed successfully! PDF form has been filled.',\n      run_id: finalState.run_id,\n      template_ref: finalState.template_ref,\n      fields_filled: finalState.fill_result.fields_filled,\n      fields_missing: finalState.fill_result.fields_missing,\n      final_pdf: finalState.fill_result.final_pdf,\n      warnings: finalState.fill_result.warnings\n    }\n  }];\n}\n\nreturn [{ json: finalState }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [7540, -480],
+      "id": "ipf-final-summary",
+      "name": "Final Summary"
+    },
+    {
+      "parameters": {
+        "jsCode": "var state = $input.first().json;\nvar step = state.current_step || 2;\n\n// For resume paths that skip directly to a step\nreturn [{\n  json: Object.assign({}, state, {\n    _skip: true,\n    _msg: 'Skipping to step ' + step + ' (steps already completed)'\n  })\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, -300],
+      "id": "ipf-resume-step2",
+      "name": "Resume at Step 2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:5678/webhook/allocate-form-mapping",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ template_ref: $json.template_ref }) }}",
+        "options": { "timeout": 120000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, -300],
+      "id": "ipf-call-step2-direct",
+      "name": "Call: Allocate Mapping (Direct)"
+    },
+    {
+      "parameters": {
+        "jsCode": "var state = $('Resume at Step 2').first().json;\nvar result = $input.first().json;\n\nvar isError = (result.statusCode && result.statusCode >= 400) || result.status === 'error';\nif (isError) {\n  return [{\n    json: {\n      status: 'failed',\n      failed_at_step: 2,\n      step_name: 'Allocate Form Mapping',\n      error: result.message || JSON.stringify(result),\n      run_id: state.run_id,\n      recovery: 'Fix the issue and re-run with start_from_step=2'\n    }\n  }];\n}\n\nvar nextStep = (state.path === 'path_a') ? 'step3a' : 'step3b';\n\nreturn [{\n  json: Object.assign({}, state, {\n    steps_completed: (state.steps_completed || []).concat([2]),\n    step2_result: { status: 'success' },\n    _next: nextStep\n  })\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1180, -300],
+      "id": "ipf-check-step2-direct",
+      "name": "Check Step 2 (Direct)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "path-check-d",
+              "leftValue": "={{ $json._next }}",
+              "rightValue": "step3a",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1420, -300],
+      "id": "ipf-route-path-direct",
+      "name": "Path A or B? (Direct)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Steps 3-5 direct resume entry point\nvar state = $input.first().json;\nvar step = state.current_step;\n\nreturn [{ json: state }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, -100],
+      "id": "ipf-resume-step3",
+      "name": "Resume at Step 3"
+    },
+    {
+      "parameters": {
+        "jsCode": "var state = $input.first().json;\nreturn [{ json: state }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 100],
+      "id": "ipf-resume-step4",
+      "name": "Resume at Step 4"
+    },
+    {
+      "parameters": {
+        "jsCode": "var state = $input.first().json;\nreturn [{ json: state }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300],
+      "id": "ipf-resume-step5",
+      "name": "Resume at Step 5"
+    },
+    {
+      "parameters": {
+        "jsCode": "var state = $input.first().json;\nreturn [{ json: state }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 500],
+      "id": "ipf-resume-step6",
+      "name": "Resume at Step 6"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Validate Params').first().json.SUPABASE_URL }}/rest/v1/system_config?parameter=eq.user_details&limit=1",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Accept", "value": "application/json" }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [5380, -480],
+      "id": "ipf-fetch-sysconfig",
+      "name": "Fetch System Config",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Validate Params').first().json.SUPABASE_URL }}/rest/v1/user_details?id=eq.{{ $('Check Step 4 Result').first().json.user_id }}&limit=1",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Accept", "value": "application/json" }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [5380, -340],
+      "id": "ipf-fetch-userdetails",
+      "name": "Fetch User Details",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var state = $('Check Step 4 Result').first().json;\n\n// Get current system_config fields\nvar configResult = $('Fetch System Config').first().json;\nvar configRow = Array.isArray(configResult) ? configResult[0] : configResult;\nvar currentFields = (configRow && configRow.setting && configRow.setting.fields) || [];\n\n// Build set of registered keys\nvar registeredKeys = {};\nfor (var i = 0; i < currentFields.length; i++) {\n  registeredKeys[currentFields[i].key] = true;\n}\n\n// Get actual user_details keys\nvar udResult = $('Fetch User Details').first().json;\nvar udRow = Array.isArray(udResult) ? udResult[0] : udResult;\nvar details = (udRow && udRow.details) || {};\nvar detailKeys = Object.keys(details);\n\n// Find new keys not in system_config\nvar newFields = [];\nfor (var k = 0; k < detailKeys.length; k++) {\n  var key = detailKeys[k];\n  if (!registeredKeys[key] && key !== '' && key.match(/^[a-z][a-z0-9_]*$/)) {\n    var label = key.replace(/_/g, ' ');\n    label = label.replace(/\\b\\w/g, function(c) { return c.toUpperCase(); });\n    newFields.push({\n      key: key,\n      label: label,\n      type: 'text',\n      required: false,\n      source: 'user_details'\n    });\n  }\n}\n\nif (newFields.length === 0) {\n  return [{ json: Object.assign({}, state, { sync_result: { status: 'no_change', new_keys: 0 } }) }];\n}\n\n// Append new fields to existing array\nvar updatedFields = currentFields.concat(newFields);\nvar newKeyNames = newFields.map(function(f) { return f.key; });\n\nreturn [{\n  json: Object.assign({}, state, {\n    _sync_needed: true,\n    _updated_setting: { fields: updatedFields },\n    sync_result: { status: 'synced', new_keys: newFields.length, keys_added: newKeyNames }\n  })\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [5620, -420],
+      "id": "ipf-build-sync",
+      "name": "Build Config Sync"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "sync-needed",
+              "leftValue": "={{ $json._sync_needed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [5860, -420],
+      "id": "ipf-if-sync-needed",
+      "name": "Sync Needed?"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Validate Params').first().json.SUPABASE_URL }}/rest/v1/system_config?parameter=eq.user_details",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=representation" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ setting: $json._updated_setting, updated_at: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [6100, -520],
+      "id": "ipf-patch-sysconfig",
+      "name": "Update System Config",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [{ "node": "Default Params", "type": "main", "index": 0 }]
+      ]
+    },
+    "Default Params": {
+      "main": [
+        [{ "node": "Validate Params", "type": "main", "index": 0 }]
+      ]
+    },
+    "Validate Params": {
+      "main": [
+        [{ "node": "Init Pipeline State", "type": "main", "index": 0 }]
+      ]
+    },
+    "Init Pipeline State": {
+      "main": [
+        [{ "node": "Prepare Route", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Route": {
+      "main": [
+        [{ "node": "Is Step 1?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Is Step 1?": {
+      "main": [
+        [{ "node": "Check Step 1", "type": "main", "index": 0 }],
+        [{ "node": "Is Step 2?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Is Step 2?": {
+      "main": [
+        [{ "node": "Resume at Step 2", "type": "main", "index": 0 }],
+        [{ "node": "Is Step 3?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Is Step 3?": {
+      "main": [
+        [{ "node": "Resume at Step 3", "type": "main", "index": 0 }],
+        [{ "node": "Is Step 4?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Is Step 4?": {
+      "main": [
+        [{ "node": "Resume at Step 4", "type": "main", "index": 0 }],
+        [{ "node": "Is Step 5?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Is Step 5?": {
+      "main": [
+        [{ "node": "Resume at Step 5", "type": "main", "index": 0 }],
+        [{ "node": "Is Step 6?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Is Step 6?": {
+      "main": [
+        [{ "node": "Resume at Step 6", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Check Step 1": {
+      "main": [
+        [{ "node": "Skip Step 1?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Skip Step 1?": {
+      "main": [
+        [{ "node": "Resume at Step 2", "type": "main", "index": 0 }],
+        [{ "node": "Call: Add Form Template", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call: Add Form Template": {
+      "main": [
+        [{ "node": "Check Step 1 Result", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Step 1 Result": {
+      "main": [
+        [{ "node": "Step 1 Error?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Step 1 Error?": {
+      "main": [
+        [{ "node": "Step 1 Failed", "type": "main", "index": 0 }],
+        [{ "node": "Mark Step 1 Done", "type": "main", "index": 0 }]
+      ]
+    },
+    "Step 1 Failed": {
+      "main": [
+        [{ "node": "Update State: Failed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Mark Step 1 Done": {
+      "main": [
+        [{ "node": "Wait: Review Mapping", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait: Review Mapping": {
+      "main": [
+        [{ "node": "Process Step 1 Resume", "type": "main", "index": 0 }]
+      ]
+    },
+    "Process Step 1 Resume": {
+      "main": [
+        [{ "node": "Update State: Step 2", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update State: Step 2": {
+      "main": [
+        [{ "node": "Call: Allocate Mapping", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call: Allocate Mapping": {
+      "main": [
+        [{ "node": "Check Step 2 Result", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Step 2 Result": {
+      "main": [
+        [{ "node": "Path A or B?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Path A or B?": {
+      "main": [
+        [{ "node": "Call: Update Extended Data", "type": "main", "index": 0 }],
+        [{ "node": "Call: Analyse Form Gaps", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call: Update Extended Data": {
+      "main": [
+        [{ "node": "Check Step 3a Result", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Step 3a Result": {
+      "main": [
+        [{ "node": "Call: Fill Form (A)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call: Fill Form (A)": {
+      "main": [
+        [{ "node": "Check Fill Result", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call: Analyse Form Gaps": {
+      "main": [
+        [{ "node": "Check Step 3b Result", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Step 3b Result": {
+      "main": [
+        [{ "node": "Mark Step 3b Done", "type": "main", "index": 0 }]
+      ]
+    },
+    "Mark Step 3b Done": {
+      "main": [
+        [{ "node": "Wait: Review Gap Report", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait: Review Gap Report": {
+      "main": [
+        [{ "node": "Process Step 3b Resume", "type": "main", "index": 0 }]
+      ]
+    },
+    "Process Step 3b Resume": {
+      "main": [
+        [{ "node": "Aborted?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Aborted?": {
+      "main": [
+        [{ "node": "Update State: Failed", "type": "main", "index": 0 }],
+        [{ "node": "Call: Generate Synthetic", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call: Generate Synthetic": {
+      "main": [
+        [{ "node": "Check Step 4 Result", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Step 4 Result": {
+      "main": [
+        [
+          { "node": "Fetch System Config", "type": "main", "index": 0 },
+          { "node": "Fetch User Details", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fetch System Config": {
+      "main": [
+        [{ "node": "Build Config Sync", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch User Details": {
+      "main": [
+        [{ "node": "Build Config Sync", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Config Sync": {
+      "main": [
+        [{ "node": "Sync Needed?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Sync Needed?": {
+      "main": [
+        [{ "node": "Update System Config", "type": "main", "index": 0 }],
+        [{ "node": "Call: Generate Realistic", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update System Config": {
+      "main": [
+        [{ "node": "Call: Generate Realistic", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call: Generate Realistic": {
+      "main": [
+        [{ "node": "Check Step 5 Result", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Step 5 Result": {
+      "main": [
+        [{ "node": "Call: Fill Form (B)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call: Fill Form (B)": {
+      "main": [
+        [{ "node": "Check Fill Result", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Fill Result": {
+      "main": [
+        [{ "node": "Update State: Final", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update State: Final": {
+      "main": [
+        [{ "node": "Final Summary", "type": "main", "index": 0 }]
+      ]
+    },
+    "Resume at Step 2": {
+      "main": [
+        [{ "node": "Call: Allocate Mapping (Direct)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call: Allocate Mapping (Direct)": {
+      "main": [
+        [{ "node": "Check Step 2 (Direct)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Step 2 (Direct)": {
+      "main": [
+        [{ "node": "Path A or B? (Direct)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Path A or B? (Direct)": {
+      "main": [
+        [{ "node": "Call: Update Extended Data", "type": "main", "index": 0 }],
+        [{ "node": "Call: Analyse Form Gaps", "type": "main", "index": 0 }]
+      ]
+    },
+    "Resume at Step 3": {
+      "main": [
+        [{ "node": "Call: Analyse Form Gaps", "type": "main", "index": 0 }]
+      ]
+    },
+    "Resume at Step 4": {
+      "main": [
+        [{ "node": "Call: Generate Synthetic", "type": "main", "index": 0 }]
+      ]
+    },
+    "Resume at Step 5": {
+      "main": [
+        [{ "node": "Call: Generate Realistic", "type": "main", "index": 0 }]
+      ]
+    },
+    "Resume at Step 6": {
+      "main": [
+        [{ "node": "Call: Fill Form (B)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "versionId": "v0.1-2026-02-22",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "0821db230f4e2311b0b89e42a29af9f42d365450a0a940495f8bb726d5a5a538"
+  },
+  "id": "ImportPDFForm01",
+  "tags": []
+}

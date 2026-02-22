@@ -1,0 +1,537 @@
+{
+  "name": "Generate Synthetic Data v0.1",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        -120
+      ],
+      "id": "gsd-manual-trigger",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"template_ref\": \"WCN-001\",\n  \"user_id\": \"f24ee278-fb1e-42dc-8777-ac9af1954d25\",\n  \"SUPABASE_URL\": \"https://egrzvwnjrtpwwmqzimff.supabase.co\",\n  \"SUPABASE_BUCKET\": \"panicleDevelop_1\",\n  \"run_id\": \"SynthData-{{ $now.format('yyyy-MM-dd_HH-mm') }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -160,
+        -120
+      ],
+      "id": "gsd-default-params",
+      "name": "Default Params",
+      "notes": "Edit template_ref to target a specific template.\nuser_id: the user to create synthetic data for.\nThe workflow downloads Generate_Data.xlsx from Supabase storage at PDF-templates/{template_ref}/Generate_Data.xlsx"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-synthetic-data",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        120
+      ],
+      "id": "gsd-webhook-trigger",
+      "name": "Webhook Trigger",
+      "webhookId": "generate-synthetic-data"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"template_ref\": \"{{ $json.body.template_ref || '' }}\",\n  \"user_id\": \"{{ $json.body.user_id || '' }}\",\n  \"SUPABASE_URL\": \"{{ $json.body.supabase_url || 'https://egrzvwnjrtpwwmqzimff.supabase.co' }}\",\n  \"SUPABASE_BUCKET\": \"{{ $json.body.supabase_bucket || 'panicleDevelop_1' }}\",\n  \"run_id\": \"{{ $json.body.run_id || 'SynthData-' + $now.format('yyyy-MM-dd_HH-mm') }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -160,
+        120
+      ],
+      "id": "gsd-extract-webhook",
+      "name": "Extract Webhook Params"
+    },
+    {
+      "parameters": {
+        "jsCode": "var params = $input.first().json;\n\nif (!params.template_ref) {\n  throw new Error('Missing required field: template_ref. Specify which template to generate data for.');\n}\nif (!params.user_id) {\n  throw new Error('Missing required field: user_id');\n}\n\nvar uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nif (!uuidPattern.test(params.user_id)) {\n  throw new Error('Invalid user_id format: \"' + params.user_id + '\". Expected UUID.');\n}\n\nvar supabaseUrl = params.SUPABASE_URL || 'https://egrzvwnjrtpwwmqzimff.supabase.co';\nvar bucket = params.SUPABASE_BUCKET || 'panicleDevelop_1';\nvar downloadUrl = supabaseUrl + '/storage/v1/object/' + bucket + '/PDF-templates/' + params.template_ref + '/Generate_Data.xlsx';\n\nreturn [{\n  json: {\n    template_ref: params.template_ref,\n    user_id: params.user_id,\n    run_id: params.run_id,\n    SUPABASE_URL: supabaseUrl,\n    SUPABASE_BUCKET: bucket,\n    download_url: downloadUrl\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        0
+      ],
+      "id": "gsd-validate-params",
+      "name": "Validate Params"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.download_url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        0
+      ],
+      "id": "gsd-download-excel",
+      "name": "Download Generate Data Excel",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var item = $input.first();\nvar config = $('Validate Params').first().json;\n\nvar hasBinary = false;\nif (item.binary) {\n  var keys = Object.keys(item.binary);\n  if (keys.length > 0) { hasBinary = true; }\n}\n\nif (!hasBinary) {\n  throw new Error('Generate_Data.xlsx not found in Supabase storage. Expected path: PDF-templates/' + config.template_ref + '/Generate_Data.xlsx. Upload the edited gap analysis Excel as Generate_Data.xlsx first.');\n}\n\nreturn [{\n  json: {\n    template_ref: config.template_ref,\n    user_id: config.user_id,\n    run_id: config.run_id,\n    SUPABASE_URL: config.SUPABASE_URL,\n    SUPABASE_BUCKET: config.SUPABASE_BUCKET\n  },\n  binary: item.binary\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        0
+      ],
+      "id": "gsd-check-download",
+      "name": "Check Download Result"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx"
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        800,
+        0
+      ],
+      "id": "gsd-read-excel",
+      "name": "Read Excel File"
+    },
+    {
+      "parameters": {
+        "jsCode": "var rows = $input.all();\nvar config = $('Check Download Result').first().json;\nvar templateRef = config.template_ref;\n\nvar SYNTHETIC_DATA = {\n  'first_name': 'Sarah',\n  'last_name': 'Mitchell',\n  'email': 'sarah.mitchell@greenfield-energy.co.uk',\n  'phone_number': '+44 20 7946 0958',\n  'mobile_number': '+44 7700 900456',\n  'company_name': 'Greenfield Energy Systems Ltd',\n  'company_number': '09876543',\n  'company_address': 'Unit 7, Innovation Park, Cambridge, CB1 2QA',\n  'postcode': 'CB1 2QA',\n  'title': 'Dr',\n  'position': 'Principal Process Engineer',\n  'website': 'www.greenfield-energy.co.uk',\n  'address': '42 Riverside Walk, Cambridge, CB5 8HT',\n  'city': 'Cambridge',\n  'county': 'Cambridgeshire',\n  'country': 'United Kingdom',\n  'date_of_birth': '1985-03-15',\n  'national_insurance': 'AB123456C',\n  'vat_number': 'GB123456789',\n  'bank_sort_code': '30-90-28',\n  'bank_account': '12345678'\n};\n\nfunction isTrueFlag(val) {\n  if (val === true || val === 1) { return true; }\n  if (typeof val === 'string') {\n    var lower = val.toLowerCase().trim();\n    if (lower === 'true' || lower === 'yes' || lower === '1') { return true; }\n  }\n  return false;\n}\n\nvar colCreateData = '';\nvar colCreated = '';\nvar colRemoveLink = '';\nvar colSuggestedKey = '';\nvar colSuggestedSource = '';\nvar colPdfField = '';\nvar colTemplateRef = '';\nvar colFieldType = '';\nvar colCurrentStatus = '';\nvar colCurrentMapping = '';\n\nvar allKeysSeen = {};\nfor (var ri = 0; ri < rows.length; ri++) {\n  var rkeys = Object.keys(rows[ri].json);\n  for (var rki = 0; rki < rkeys.length; rki++) {\n    allKeysSeen[rkeys[rki]] = true;\n  }\n}\nvar keys = Object.keys(allKeysSeen);\nfor (var k = 0; k < keys.length; k++) {\n  var lk = keys[k].toLowerCase();\n  if (lk.indexOf('create') >= 0 && lk.indexOf('data') >= 0) { colCreateData = keys[k]; }\n  else if (lk === 'created') { colCreated = keys[k]; }\n  else if (lk.indexOf('remove') >= 0 && lk.indexOf('link') >= 0) { colRemoveLink = keys[k]; }\n  else if (lk.indexOf('suggested') >= 0 && lk.indexOf('key') >= 0) { colSuggestedKey = keys[k]; }\n  else if (lk.indexOf('suggested') >= 0 && lk.indexOf('source') >= 0) { colSuggestedSource = keys[k]; }\n  else if (lk.indexOf('pdf') >= 0 && lk.indexOf('field') >= 0 && lk.indexOf('name') >= 0) { colPdfField = keys[k]; }\n  else if (lk.indexOf('template') >= 0 && lk.indexOf('ref') >= 0) { colTemplateRef = keys[k]; }\n  else if (lk.indexOf('field') >= 0 && lk.indexOf('type') >= 0) { colFieldType = keys[k]; }\n  else if (lk.indexOf('current') >= 0 && lk.indexOf('status') >= 0) { colCurrentStatus = keys[k]; }\n  else if (lk.indexOf('current') >= 0 && lk.indexOf('mapping') >= 0) { colCurrentMapping = keys[k]; }\n}\n\nif (!colCreateData) {\n  throw new Error('Column \"Create Data\" not found in Excel. Keys found across all rows: ' + keys.join(', '));\n}\nif (!colPdfField) {\n  throw new Error('Column \"PDF Field Name\" not found in Excel.');\n}\nif (!colCreated) { colCreated = 'Created'; }\nif (!colRemoveLink) { colRemoveLink = 'Remove Link'; }\n\nvar fieldsToUpdate = [];\nvar fieldsToRemove = [];\nvar syntheticValues = {};\nvar skipped = [];\nvar updatedExcelRows = [];\nvar debugBlankCount = 0;\nvar debugHasCreateDataKey = 0;\n\nfor (var i = 0; i < rows.length; i++) {\n  var row = rows[i].json;\n  var pdfField = colPdfField ? String(row[colPdfField] || '').trim() : '';\n  var suggestedKey = colSuggestedKey ? String(row[colSuggestedKey] || '').trim() : '';\n  var suggestedSource = colSuggestedSource ? String(row[colSuggestedSource] || '').trim() : '';\n  var rowTplRef = colTemplateRef ? String(row[colTemplateRef] || '').trim() : '';\n  var removeFlag = colRemoveLink ? isTrueFlag(row[colRemoveLink]) : false;\n  var hasCreateDataKey = row.hasOwnProperty(colCreateData);\n  var rawCreateData = hasCreateDataKey ? row[colCreateData] : undefined;\n  var createDataStr = String(rawCreateData === undefined || rawCreateData === null ? '' : rawCreateData).trim();\n  var isBlank = !hasCreateDataKey || createDataStr === '' || createDataStr === '.';\n  var isTrue = isTrueFlag(rawCreateData);\n  var isLiteralValue = !isBlank && !isTrue;\n\n  if (hasCreateDataKey) { debugHasCreateDataKey++; }\n\n  var excelRow = {};\n  var rowKeys = Object.keys(row);\n  for (var rk = 0; rk < rowKeys.length; rk++) {\n    excelRow[rowKeys[rk]] = row[rowKeys[rk]];\n  }\n  if (!excelRow.hasOwnProperty(colCreated)) { excelRow[colCreated] = ''; }\n  if (!excelRow.hasOwnProperty(colRemoveLink)) { excelRow[colRemoveLink] = ''; }\n\n  if (removeFlag && pdfField) {\n    if (rowTplRef && rowTplRef !== templateRef) {\n      skipped.push(pdfField + ' (remove link: different template ' + rowTplRef + ')');\n    } else {\n      fieldsToRemove.push(pdfField);\n    }\n    updatedExcelRows.push(excelRow);\n    continue;\n  }\n\n  if (isBlank) {\n    debugBlankCount++;\n    updatedExcelRows.push(excelRow);\n    continue;\n  }\n\n  if (!pdfField) {\n    skipped.push('Row ' + (i + 2) + ': empty PDF field name');\n    updatedExcelRows.push(excelRow);\n    continue;\n  }\n\n  if (rowTplRef && rowTplRef !== templateRef) {\n    skipped.push(pdfField + ' (different template: ' + rowTplRef + ')');\n    updatedExcelRows.push(excelRow);\n    continue;\n  }\n\n  if (suggestedSource && suggestedSource !== 'users' && suggestedSource !== 'user_details') {\n    skipped.push(pdfField + ' (source: ' + suggestedSource + ' -- not user data, skipped)');\n    updatedExcelRows.push(excelRow);\n    continue;\n  }\n\n  var effectiveKey = suggestedKey;\n  if (!effectiveKey) {\n    effectiveKey = pdfField.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');\n  }\n  var effectiveSource = suggestedSource || 'user_details';\n\n  var value;\n  if (isLiteralValue) {\n    value = createDataStr;\n  } else {\n    value = SYNTHETIC_DATA[effectiveKey];\n    if (!value) {\n      value = 'Synthetic ' + effectiveKey.replace(/_/g, ' ');\n    }\n  }\n\n  fieldsToUpdate.push({\n    pdfField: pdfField,\n    dataKey: effectiveKey,\n    source: effectiveSource\n  });\n  syntheticValues[effectiveKey] = value;\n\n  if (colCreated) { excelRow[colCreated] = 'TRUE'; }\n  updatedExcelRows.push(excelRow);\n}\n\nif (fieldsToUpdate.length === 0 && fieldsToRemove.length === 0) {\n  var debugCols = 'Detected columns: CreateData=' + colCreateData + ', Created=' + colCreated + ', RemoveLink=' + colRemoveLink + ', SuggestedKey=' + colSuggestedKey + ', PdfField=' + colPdfField;\n  var debugStats = ' Total rows: ' + rows.length + ', Blank/no-CreateData: ' + debugBlankCount + ', Rows with CreateData key: ' + debugHasCreateDataKey;\n  var debugDataRow = '';\n  for (var dr = 0; dr < rows.length; dr++) {\n    var drKeys = Object.keys(rows[dr].json);\n    if (drKeys.indexOf(colCreateData) >= 0) {\n      var drRow = rows[dr].json;\n      debugDataRow = ' Row' + dr + ' has CreateData key: val=' + JSON.stringify(drRow[colCreateData]) + ' (type:' + typeof drRow[colCreateData] + ')';\n      break;\n    }\n  }\n  if (!debugDataRow) { debugDataRow = ' No row has the \"' + colCreateData + '\" key as own property.'; }\n  var debugSkipped = skipped.length > 0 ? ' Skipped(' + skipped.length + '): ' + skipped.slice(0, 5).join('; ') : '';\n  var debugAllKeys = ' All keys seen: ' + keys.join(', ');\n  throw new Error('No actionable rows found.' + debugCols + '.' + debugStats + '.' + debugDataRow + '.' + debugSkipped + debugAllKeys);\n}\n\nreturn [{\n  json: {\n    template_ref: templateRef,\n    user_id: config.user_id,\n    run_id: config.run_id,\n    SUPABASE_URL: config.SUPABASE_URL,\n    SUPABASE_BUCKET: config.SUPABASE_BUCKET,\n    fields_to_update: fieldsToUpdate,\n    fields_to_remove: fieldsToRemove,\n    synthetic_values: syntheticValues,\n    synthetic_count: Object.keys(syntheticValues).length,\n    fields_count: fieldsToUpdate.length,\n    remove_count: fieldsToRemove.length,\n    skipped: skipped,\n    updated_excel_rows: updatedExcelRows,\n    _columns_detected: {\n      createData: colCreateData,\n      created: colCreated,\n      removeLink: colRemoveLink,\n      suggestedKey: colSuggestedKey,\n      suggestedSource: colSuggestedSource,\n      pdfField: colPdfField,\n      templateRef: colTemplateRef\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        0
+      ],
+      "id": "gsd-filter-generate",
+      "name": "Filter & Generate Synthetic Data"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.SUPABASE_URL }}/rest/v1/pdf_ff_templates?template_ref=eq.{{ $json.template_ref }}&select=id,template_ref,source_to_template_mapping&limit=1",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1280,
+        0
+      ],
+      "id": "gsd-fetch-mapping",
+      "name": "Fetch Existing Mapping",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var synthData = $('Filter & Generate Synthetic Data').first().json;\nvar fetchResult = $input.all();\n\nvar existing = null;\nif (fetchResult.length > 0) {\n  existing = fetchResult[0].json;\n}\nif (Array.isArray(existing)) {\n  existing = existing[0];\n}\n\nif (!existing || !existing.id) {\n  throw new Error('Template not found: ' + synthData.template_ref + '. Check that the template_ref exists in pdf_ff_templates.');\n}\n\nvar oldMapping = existing.source_to_template_mapping || [];\nvar fieldsToUpdate = synthData.fields_to_update;\nvar fieldsToRemove = synthData.fields_to_remove || [];\n\nvar updateLookup = {};\nfor (var f = 0; f < fieldsToUpdate.length; f++) {\n  updateLookup[fieldsToUpdate[f].pdfField] = {\n    dataKey: fieldsToUpdate[f].dataKey,\n    source: fieldsToUpdate[f].source\n  };\n}\n\nvar removeLookup = {};\nfor (var r = 0; r < fieldsToRemove.length; r++) {\n  removeLookup[fieldsToRemove[r]] = true;\n}\n\nvar newMapping = [];\nvar updatedCount = 0;\nvar removedCount = 0;\nfor (var m = 0; m < oldMapping.length; m++) {\n  var entry = oldMapping[m];\n  if (removeLookup[entry.pdfField]) {\n    newMapping.push({\n      pdfField: entry.pdfField,\n      fieldType: entry.fieldType || '',\n      dataKey: '',\n      source: '',\n      confidence: '',\n      score: 0,\n      notes: 'Mapping removed ' + synthData.run_id\n    });\n    removedCount++;\n  } else if (updateLookup[entry.pdfField]) {\n    var update = updateLookup[entry.pdfField];\n    newMapping.push({\n      pdfField: entry.pdfField,\n      fieldType: entry.fieldType || '',\n      dataKey: update.dataKey,\n      source: update.source,\n      confidence: 'synthetic',\n      score: 1.0,\n      notes: 'Synthetic data generated ' + synthData.run_id\n    });\n    updatedCount++;\n  } else {\n    newMapping.push(entry);\n  }\n}\n\nreturn [{\n  json: {\n    template_ref: synthData.template_ref,\n    user_id: synthData.user_id,\n    run_id: synthData.run_id,\n    SUPABASE_URL: synthData.SUPABASE_URL,\n    SUPABASE_BUCKET: synthData.SUPABASE_BUCKET,\n    new_mapping: newMapping,\n    details_jsonb: synthData.synthetic_values,\n    updated_field_count: updatedCount,\n    removed_field_count: removedCount,\n    total_mapping_count: newMapping.length,\n    synthetic_keys: Object.keys(synthData.synthetic_values),\n    skipped: synthData.skipped,\n    updated_excel_rows: synthData.updated_excel_rows\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        0
+      ],
+      "id": "gsd-build-payload",
+      "name": "Build Update Payload"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $json.SUPABASE_URL }}/rest/v1/pdf_ff_templates?template_ref=eq.{{ $json.template_ref }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ source_to_template_mapping: $json.new_mapping, updated_at: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        0
+      ],
+      "id": "gsd-update-template",
+      "name": "Update Template Record",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Build Update Payload').first().json.SUPABASE_URL }}/rest/v1/rpc/upsert_user_details",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_user_id: $('Build Update Payload').first().json.user_id, p_details: $('Build Update Payload').first().json.details_jsonb }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2000,
+        0
+      ],
+      "id": "gsd-upsert-user",
+      "name": "Upsert User Details",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var payload = $('Build Update Payload').first().json;\nvar excelRows = payload.updated_excel_rows || [];\nvar result = [];\nfor (var i = 0; i < excelRows.length; i++) {\n  result.push({ json: excelRows[i] });\n}\nif (result.length === 0) {\n  result.push({ json: { 'Note': 'No rows to write' } });\n}\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        0
+      ],
+      "id": "gsd-format-updated-excel",
+      "name": "Format Updated Excel"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {
+          "fileName": "Generate_Data.xlsx"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        2480,
+        0
+      ],
+      "id": "gsd-write-updated-excel",
+      "name": "Write Updated Excel"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Build Update Payload').first().json.SUPABASE_URL }}/storage/v1/object/{{ $('Build Update Payload').first().json.SUPABASE_BUCKET }}/PDF-templates/{{ $('Build Update Payload').first().json.template_ref }}/Generate_Data.xlsx",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-upsert",
+              "value": "true"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2720,
+        0
+      ],
+      "id": "gsd-upload-updated-excel",
+      "name": "Upload Updated Excel",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var payload = $('Build Update Payload').first().json;\nvar patchResult = $('Update Template Record').first().json;\nvar rpcResult = $('Upsert User Details').first().json;\n\nvar syntheticKeys = payload.synthetic_keys;\nvar keysStr = syntheticKeys.length > 0 ? syntheticKeys.join(', ') : '(none)';\n\nvar msg = 'Synthetic data generation complete for template ' + payload.template_ref + '.';\nif (payload.updated_field_count > 0) {\n  msg = msg + ' ' + payload.updated_field_count + ' field mapping(s) created (confidence: synthetic).';\n  msg = msg + ' ' + syntheticKeys.length + ' synthetic data key(s): ' + keysStr + '.';\n  msg = msg + ' User details upserted for user ' + payload.user_id + '.';\n}\nif (payload.removed_field_count > 0) {\n  msg = msg + ' ' + payload.removed_field_count + ' field mapping(s) removed (unlinked).';\n}\nif (payload.skipped.length > 0) {\n  msg = msg + ' ' + payload.skipped.length + ' row(s) skipped.';\n}\nmsg = msg + ' Generate_Data.xlsx updated with Created=TRUE markers.';\n\nreturn [{\n  json: {\n    status: 'success',\n    message: msg,\n    run_id: payload.run_id,\n    template_ref: payload.template_ref,\n    user_id: payload.user_id,\n    fields_created: payload.updated_field_count,\n    fields_removed: payload.removed_field_count,\n    total_mapping_fields: payload.total_mapping_count,\n    synthetic_data_keys: syntheticKeys,\n    synthetic_values: payload.details_jsonb,\n    skipped_rows: payload.skipped,\n    next_step: 'Run Fill Form workflow with template_ref=\"' + payload.template_ref + '\" and user_id=\"' + payload.user_id + '\" to test the synthetic data.'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2960,
+        0
+      ],
+      "id": "gsd-return-summary",
+      "name": "Return Summary"
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Default Params",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Webhook Params",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Default Params": {
+      "main": [
+        [
+          {
+            "node": "Validate Params",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Webhook Params": {
+      "main": [
+        [
+          {
+            "node": "Validate Params",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Params": {
+      "main": [
+        [
+          {
+            "node": "Download Generate Data Excel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Generate Data Excel": {
+      "main": [
+        [
+          {
+            "node": "Check Download Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Download Result": {
+      "main": [
+        [
+          {
+            "node": "Read Excel File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Excel File": {
+      "main": [
+        [
+          {
+            "node": "Filter & Generate Synthetic Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter & Generate Synthetic Data": {
+      "main": [
+        [
+          {
+            "node": "Fetch Existing Mapping",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Existing Mapping": {
+      "main": [
+        [
+          {
+            "node": "Build Update Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Update Payload": {
+      "main": [
+        [
+          {
+            "node": "Update Template Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Template Record": {
+      "main": [
+        [
+          {
+            "node": "Upsert User Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert User Details": {
+      "main": [
+        [
+          {
+            "node": "Format Updated Excel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Updated Excel": {
+      "main": [
+        [
+          {
+            "node": "Write Updated Excel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Updated Excel": {
+      "main": [
+        [
+          {
+            "node": "Upload Updated Excel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Updated Excel": {
+      "main": [
+        [
+          {
+            "node": "Return Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "v0.1-2026-02-21",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "0821db230f4e2311b0b89e42a29af9f42d365450a0a940495f8bb726d5a5a538"
+  },
+  "id": "GenerateSyntheticData01",
+  "tags": []
+}

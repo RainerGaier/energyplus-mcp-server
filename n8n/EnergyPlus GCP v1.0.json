@@ -1,0 +1,629 @@
+{
+  "name": "EnergyPlus GCP v1.0",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        0
+      ],
+      "id": "0689aa62-885e-4c08-8b78-ea646e50cabb",
+      "name": "When clicking 'Execute workflow'"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.API_BASE_URL }}/health",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        260,
+        0
+      ],
+      "id": "aebd0b8b-6491-45f4-a1f6-e3b5b76110c5",
+      "name": "Health Check"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.API_BASE_URL }}/api/models/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"project_name\": \"{{ $('Config').item.json.project_name }}\",\n  \"location\": {\n    \"latitude\": {{ $('Config').item.json.latitude }},\n    \"longitude\": {{ $('Config').item.json.longitude }},\n    \"site_name\": \"{{ $('Config').item.json.location_name }}\"\n  },\n  \"building_type\": \"{{ $('Config').item.json.building_type }}\",\n  \"data_center\": {\n    \"rack_count\": {{ $('Config').item.json.data_center.rack_count }},\n    \"watts_per_rack\": {{ $('Config').item.json.data_center.watts_per_rack }}\n  }\n}\n",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1108,
+        0
+      ],
+      "id": "a5f777f5-e332-4b4c-9e11-da59e45f88da",
+      "name": "Generate Model"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.API_BASE_URL }}/api/weather/fetch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"latitude\": {{ $('Config').item.json.latitude }},\n  \"longitude\": {{ $('Config').item.json.longitude }},\n  \"location_name\": \"{{ $('Config').item.json.location_name }}\"\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        676,
+        0
+      ],
+      "id": "2d0dd387-1d3c-43ea-a6a2-5048068b6a3f",
+      "name": "Fetch Weather"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.API_BASE_URL }}/api/simulation/run",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"idf_path\": \"{{ $('Generate Model').item.json.output_path }}\",\n  \"weather_file\": \"{{ $('Fetch Weather').item.json.epw_path }}\",\n  \"annual\": {{ $('Config').item.json.simulation.annual }},\n  \"design_day\": {{ $('Config').item.json.simulation.design_day }}\n}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1524,
+        0
+      ],
+      "id": "510bec9c-d966-45ef-a487-b24f108e5edd",
+      "name": "Run Simulation",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.API_BASE_URL }}/api/simulation/results/summary",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "output_directory",
+              "value": "={{ $('Run Simulation').item.json.output_directory }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2020,
+        -16
+      ],
+      "id": "2c1e1234-e5c2-49de-97ec-515e40b38d48",
+      "name": "Summary Results"
+    },
+    {
+      "parameters": {
+        "errorMessage": "EnergyPlus MCP server health check failed. Check if container is running on GCP VM."
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        468,
+        224
+      ],
+      "id": "9c80d77a-10cd-4fda-a01f-244eb386333c",
+      "name": "Server Unavailable"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"API_BASE_URL\": \"http://34.28.104.162:8081\",\n  \"version\": \"1.0\",\n  \"environment\": \"gcp_vm\",\n  \"last_updated\": \"{{ new Date().toISOString() }}\",\n  \n  \"latitude\": 52.2053,\n  \"longitude\": 0.1218,\n  \"location_name\": \"Cambridge_UK\",\n  \n  \"project_name\": \"GCP Test Data Center\",\n  \"building_type\": \"data_center\",\n  \n  \"data_center\": {\n    \"rack_count\": 25,\n    \"watts_per_rack\": 2000\n  },\n  \n  \"simulation\": {\n    \"annual\": false,\n    \"design_day\": true\n  },\n  \n  \"export\": {\n    \"supabase\": true,\n    \"google_drive\": false\n  }\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        52,
+        0
+      ],
+      "id": "2336ac60-7ea7-423b-b7e5-da22dc73c540",
+      "name": "Config",
+      "notesInFlow": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5068b8a5-9526-444e-a806-44fe7480bee1",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        884,
+        0
+      ],
+      "id": "18043515-6378-48f5-a8ec-83c758c8793a",
+      "name": "Check Weather"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7a7a4be1-d11e-44e8-a243-350b208c1cf7",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "healthy",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        468,
+        0
+      ],
+      "id": "18271295-cb78-495a-9267-26c45a006bde",
+      "name": "Check Services"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c2cc96f8-2ce9-4886-a9eb-7a84fda43a45",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1316,
+        0
+      ],
+      "id": "368bd581-5913-4e1d-8466-d0d847a2d4d8",
+      "name": "Check Model"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fdae03b2-762d-4dc8-87d4-62a3ca47974e",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1732,
+        0
+      ],
+      "id": "848551a5-c11a-4a77-8975-e54e30f21d0d",
+      "name": "Check Simulation"
+    },
+    {
+      "parameters": {
+        "errorMessage": "=Simulation failed: {{ $json.error || $json.detail || 'Unknown error' }}"
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1732,
+        224
+      ],
+      "id": "50d72850-5a52-434f-b067-30d837c679d3",
+      "name": "Simulation Failed"
+    },
+    {
+      "parameters": {
+        "errorMessage": "=Model generation failed: {{ $json.error || $json.detail || 'Unknown error' }}"
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1316,
+        224
+      ],
+      "id": "502000a4-d668-49c1-8855-8d9ae913daa6",
+      "name": "Model Generation Failed"
+    },
+    {
+      "parameters": {
+        "errorMessage": "=Weather fetch failed: {{ $json.error || $json.detail || 'Unknown error' }}"
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        884,
+        224
+      ],
+      "id": "23ec2f86-3ad7-4c5c-8010-e0c49de45fca",
+      "name": "Weather Fetch Failed"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.API_BASE_URL }}/api/simulation/results",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "output_directory",
+              "value": "={{ $('Run Simulation').item.json.output_directory }}"
+            },
+            {
+              "name": "include_timeseries",
+              "value": "=false"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2292,
+        -16
+      ],
+      "id": "fcee8bae-e02e-43e2-8314-990cc1e0d6be",
+      "name": "Get Full Results"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fdae03b2-762d-4dc8-87d4-62a3ca47974e",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2756,
+        -16
+      ],
+      "id": "15f5c490-ae74-4390-a658-1fa5556cc69c",
+      "name": "Check Supabase Copy"
+    },
+    {
+      "parameters": {
+        "errorMessage": "=Supabase export failed: {{ $json.error || $json.detail || 'Unknown error' }}"
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        2756,
+        224
+      ],
+      "id": "e98f1d55-9909-4fff-95fb-9b0b50f5a141",
+      "name": "Supabase Copy Failed"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.API_BASE_URL }}/api/export/supabase",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"source_folder\": \"{{ $('Run Simulation').item.json.output_directory }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2500,
+        -16
+      ],
+      "id": "48063bad-b8dd-4d66-9502-532e56603cb2",
+      "name": "Export to Supabase"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"workflow_name\": \"EnergyPlus GCP v1.0\",\n  \"status\": \"completed\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\",\n  \"project_name\": \"{{ $('Config').item.json.project_name }}\",\n  \"location\": \"{{ $('Config').item.json.location_name }}\",\n  \"building_type\": \"{{ $('Config').item.json.building_type }}\",\n  \"simulation_results\": {\n    \"output_directory\": \"{{ $('Run Simulation').item.json.output_directory }}\",\n    \"success\": true\n  },\n  \"supabase_export\": {\n    \"bucket\": \"{{ $('Export to Supabase').item.json.bucket }}\",\n    \"folder\": \"{{ $('Export to Supabase').item.json.folder_path }}\"\n  },\n  \"endpoints\": {\n    \"api_docs\": \"{{ $('Config').item.json.API_BASE_URL }}/docs\",\n    \"health\": \"{{ $('Config').item.json.API_BASE_URL }}/health\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2980,
+        -16
+      ],
+      "id": "final-summary-node",
+      "name": "Final Summary"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking 'Execute workflow'": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Health Check": {
+      "main": [
+        [
+          {
+            "node": "Check Services",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Weather": {
+      "main": [
+        [
+          {
+            "node": "Check Weather",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Model": {
+      "main": [
+        [
+          {
+            "node": "Check Model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Simulation": {
+      "main": [
+        [
+          {
+            "node": "Check Simulation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Health Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Weather": {
+      "main": [
+        [
+          {
+            "node": "Generate Model",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Weather Fetch Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Services": {
+      "main": [
+        [
+          {
+            "node": "Fetch Weather",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Server Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Model": {
+      "main": [
+        [
+          {
+            "node": "Run Simulation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Model Generation Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Simulation": {
+      "main": [
+        [
+          {
+            "node": "Summary Results",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Simulation Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summary Results": {
+      "main": [
+        [
+          {
+            "node": "Get Full Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Full Results": {
+      "main": [
+        [
+          {
+            "node": "Export to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Supabase Copy": {
+      "main": [
+        [
+          {
+            "node": "Final Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase Copy Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Export to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Check Supabase Copy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "gcp-v1.0-2026-02",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1a31eed7b82cb7f448f2abc5a538a777a1f9a344ccc5df5f3741cf94e7885baa"
+  },
+  "id": "energyplus-gcp-v1",
+  "tags": ["energyplus", "gcp", "production"]
+}

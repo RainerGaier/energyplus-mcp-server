@@ -1,0 +1,392 @@
+{
+  "name": "Analyse Form Gaps v0.1",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        0
+      ],
+      "id": "afg-manual-trigger",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"template_ref\": \"\",\n  \"SUPABASE_URL\": \"https://egrzvwnjrtpwwmqzimff.supabase.co\",\n  \"SUPABASE_BUCKET\": \"panicleDevelop_1\",\n  \"run_id\": \"GapAnalysis-{{ $now.format('yyyy-MM-dd_HH-mm') }}\",\n  \"min_score\": 0.70\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        80,
+        0
+      ],
+      "id": "afg-default-params",
+      "name": "Default Params",
+      "notes": "Set template_ref to analyse a specific template, or leave empty to analyse ALL templates.\nmin_score: 0.70 (lower than auto-mapping threshold — wider net for suggestions)."
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "analyse-form-gaps",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        240
+      ],
+      "id": "afg-webhook-trigger",
+      "name": "Webhook Trigger",
+      "webhookId": "analyse-form-gaps"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"template_ref\": \"{{ $json.body.template_ref || '' }}\",\n  \"SUPABASE_URL\": \"{{ $json.body.supabase_url || 'https://egrzvwnjrtpwwmqzimff.supabase.co' }}\",\n  \"SUPABASE_BUCKET\": \"{{ $json.body.supabase_bucket || 'panicleDevelop_1' }}\",\n  \"run_id\": \"{{ $json.body.run_id || 'GapAnalysis-' + $now.format('yyyy-MM-dd_HH-mm') }}\",\n  \"min_score\": {{ $json.body.min_score || 0.70 }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        80,
+        240
+      ],
+      "id": "afg-extract-webhook",
+      "name": "Extract Webhook Params"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.SUPABASE_URL }}/rest/v1/pdf_ff_templates?select=template_ref,title,source_to_template_mapping{{ $json.template_ref ? '&template_ref=eq.' + $json.template_ref : '' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        320,
+        128
+      ],
+      "id": "afg-fetch-templates",
+      "name": "Fetch Templates",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Default Params').first().json.SUPABASE_URL }}/rest/v1/system_config?parameter=eq.user_details&limit=1",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        560,
+        128
+      ],
+      "id": "afg-fetch-sysconfig",
+      "name": "Fetch System Config",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var config = $('Default Params').first().json;\nvar sysConfigArr = $('Fetch System Config').first().json;\nvar templatesAll = $('Fetch Templates').all();\n\nvar templates = [];\nfor (var ti = 0; ti < templatesAll.length; ti++) {\n  templates.push(templatesAll[ti].json);\n}\n\nvar configData = Array.isArray(sysConfigArr) ? sysConfigArr[0] : sysConfigArr;\nvar fields = [];\nif (configData && configData.setting && configData.setting.fields) {\n  fields = configData.setting.fields;\n}\n\nvar userFields = [];\nvar extraAliases = {\n  'first_name': ['first name', 'forename', 'given name', 'firstname', 'applicant name'],\n  'last_name': ['last name', 'surname', 'family name', 'lastname'],\n  'phone_number': ['phone number', 'telephone number', 'telephone', 'tel number', 'landline', 'contact number'],\n  'email': ['email', 'email address', 'e-mail', 'e mail'],\n  'company_name': ['company', 'company name', 'organisation', 'organization', 'business name'],\n  'company_number': ['company number', 'company no', 'registration number', 'company reg'],\n  'company_address': ['company address', 'business address', 'registered address'],\n  'website': ['website', 'web site', 'url'],\n  'mobile_number': ['mobile', 'mobile number', 'mobile no', 'cell phone', 'mob number'],\n  'postcode': ['postcode', 'post code', 'zip code', 'zip', 'pcode', 'p code'],\n  'title': ['title', 'salutation', 'prefix'],\n  'position': ['position', 'job title', 'role']\n};\n\nfor (var i = 0; i < fields.length; i++) {\n  var f = fields[i];\n  var aliases = [f.key.replace(/_/g, ' ')];\n  if (f.label) { aliases.push(f.label.toLowerCase()); }\n  var extra = extraAliases[f.key];\n  if (extra) {\n    for (var ei = 0; ei < extra.length; ei++) {\n      if (aliases.indexOf(extra[ei]) < 0) { aliases.push(extra[ei]); }\n    }\n  }\n  userFields.push({ key: f.key, source: f.source || 'users', aliases: aliases, category: 'user_data' });\n}\n\nvar resultsFields = [];\n\nfunction addR(key, aliases, cat) {\n  var all = [key.split('.').pop().replace(/_/g, ' ')];\n  for (var a = 0; a < aliases.length; a++) {\n    if (all.indexOf(aliases[a]) < 0) { all.push(aliases[a]); }\n  }\n  resultsFields.push({ key: 'results.' + key, source: 'results', aliases: all, category: cat || 'results' });\n}\n\naddR('capital_costs.TCI', ['tci', 'total capital investment', 'capital investment', 'total investment'], 'capital_costs');\naddR('capital_costs.FCI', ['fci', 'fixed capital investment', 'fixed capital'], 'capital_costs');\naddR('capital_costs.TDC', ['tdc', 'total direct cost', 'direct cost'], 'capital_costs');\naddR('capital_costs.DPI', ['dpi', 'direct permanent investment'], 'capital_costs');\naddR('capital_costs.installed_equipment_cost', ['installed equipment cost', 'installed cost', 'equipment installed'], 'capital_costs');\naddR('capital_costs.purchase_cost', ['purchase cost', 'equipment purchase cost', 'equipment cost'], 'capital_costs');\naddR('capital_costs.working_capital', ['working capital'], 'capital_costs');\n\naddR('operating_costs.VOC', ['voc', 'variable operating cost', 'variable cost'], 'operating_costs');\naddR('operating_costs.FOC', ['foc', 'fixed operating cost', 'fixed cost'], 'operating_costs');\naddR('operating_costs.AOC', ['aoc', 'annual operating cost', 'total operating cost', 'operating cost'], 'operating_costs');\naddR('operating_costs.material_cost', ['material cost', 'raw material cost', 'materials'], 'operating_costs');\naddR('operating_costs.utility_cost', ['utility cost', 'utilities cost', 'energy cost'], 'operating_costs');\naddR('operating_costs.labor_cost', ['labor cost', 'labour cost', 'labor', 'labour', 'wages'], 'operating_costs');\n\naddR('metrics.IRR', ['irr', 'internal rate of return', 'rate of return'], 'metrics');\naddR('metrics.NPV', ['npv', 'net present value', 'present value'], 'metrics');\naddR('metrics.ROI', ['roi', 'return on investment', 'return'], 'metrics');\naddR('metrics.PBP', ['pbp', 'payback period', 'payback'], 'metrics');\naddR('metrics.sales', ['sales', 'revenue', 'total sales', 'annual sales'], 'metrics');\naddR('metrics.net_earnings', ['net earnings', 'net income', 'profit', 'earnings'], 'metrics');\naddR('metrics.annual_depreciation', ['annual depreciation', 'depreciation'], 'metrics');\n\naddR('tea_configuration.operating_hours', ['operating hours', 'annual hours', 'hours per year'], 'tea_config');\naddR('tea_configuration.operating_days', ['operating days', 'annual days', 'days per year'], 'tea_config');\naddR('tea_configuration.income_tax', ['income tax', 'tax rate', 'corporate tax'], 'tea_config');\naddR('tea_configuration.depreciation_method', ['depreciation method', 'macrs', 'depreciation type'], 'tea_config');\naddR('tea_configuration.startup_months', ['startup months', 'startup period', 'startup time'], 'tea_config');\naddR('tea_configuration.working_capital_fraction', ['working capital fraction', 'working capital percent'], 'tea_config');\naddR('tea_configuration.maintenance_fraction', ['maintenance fraction', 'maintenance cost fraction'], 'tea_config');\naddR('tea_configuration.property_insurance_fraction', ['property insurance', 'insurance fraction', 'insurance'], 'tea_config');\naddR('tea_configuration.finance_fraction', ['finance fraction', 'debt fraction', 'loan fraction'], 'tea_config');\naddR('tea_configuration.finance_interest', ['finance interest', 'interest rate', 'loan interest'], 'tea_config');\naddR('tea_configuration.finance_years', ['finance years', 'loan term', 'loan years'], 'tea_config');\naddR('tea_configuration.project_lifetime', ['project lifetime', 'plant lifetime', 'lifetime', 'project life'], 'tea_config');\n\naddR('utility_summary.electricity.consumption_kW', ['electricity consumption', 'power consumption', 'electricity demand'], 'utilities');\naddR('utility_summary.electricity.production_kW', ['electricity production', 'power production', 'electricity generated'], 'utilities');\naddR('utility_summary.electricity.net_kW', ['net electricity', 'net power', 'electricity balance'], 'utilities');\naddR('utility_summary.electricity.cost_USD_hr', ['electricity cost', 'power cost'], 'utilities');\naddR('utility_summary.total_utility_cost_USD_hr', ['total utility cost', 'utility cost per hour', 'total utilities'], 'utilities');\n\naddR('stream_economics.total_feed_cost_USD_hr', ['total feed cost', 'feedstock cost', 'feed cost'], 'stream_economics');\naddR('stream_economics.total_product_revenue_USD_hr', ['total product revenue', 'product revenue', 'total revenue'], 'stream_economics');\naddR('stream_economics.gross_margin_USD_hr', ['gross margin', 'margin', 'profit margin'], 'stream_economics');\n\naddR('cashflow.total_cash_flow_MM', ['total cash flow', 'cash flow', 'cumulative cash flow'], 'cashflow');\naddR('cashflow.project_lifetime_years', ['project lifetime years', 'cashflow lifetime'], 'cashflow');\n\nvar runParams = [\n  { name: 'feedstock_price', aliases: ['feedstock price', 'biomass price', 'feedstock cost'] },\n  { name: 'enzyme_price', aliases: ['enzyme price', 'enzyme cost'] },\n  { name: 'electricity_price', aliases: ['electricity price', 'power price', 'electricity tariff'] },\n  { name: 'natural_gas_price', aliases: ['natural gas price', 'gas price', 'natural gas cost'] },\n  { name: 'product_price', aliases: ['product price', 'selling price', 'product selling price'] },\n  { name: 'byproduct_price', aliases: ['byproduct price', 'co-product price'] },\n  { name: 'labor_cost', aliases: ['labor cost', 'labour cost', 'workforce cost'] },\n  { name: 'operating_hours', aliases: ['operating hours', 'plant hours', 'annual operating hours'] },\n  { name: 'feedstock_flow_rate', aliases: ['feedstock flow rate', 'feed rate', 'biomass flow'] },\n  { name: 'pretreatment_temp', aliases: ['pretreatment temperature', 'pretreatment temp'] },\n  { name: 'pretreatment_time', aliases: ['pretreatment time', 'pretreatment duration'] },\n  { name: 'enzyme_loading', aliases: ['enzyme loading', 'enzyme dose'] },\n  { name: 'saccharification_time', aliases: ['saccharification time', 'hydrolysis time'] },\n  { name: 'fermentation_time', aliases: ['fermentation time', 'fermentation duration'] },\n  { name: 'discount_rate', aliases: ['discount rate', 'wacc', 'cost of capital'] },\n  { name: 'income_tax_rate', aliases: ['income tax rate', 'tax rate', 'corporate tax rate'] },\n  { name: 'plant_lifetime', aliases: ['plant lifetime', 'project lifetime', 'plant life'] },\n  { name: 'boiler_efficiency', aliases: ['boiler efficiency'] },\n  { name: 'turbine_efficiency', aliases: ['turbine efficiency'] },\n  { name: 'steam_pressure', aliases: ['steam pressure'] },\n  { name: 'cooling_water_temp', aliases: ['cooling water temperature', 'cooling water temp'] },\n  { name: 'recovery_efficiency', aliases: ['recovery efficiency', 'recovery rate'] },\n  { name: 'ethanol_purity', aliases: ['ethanol purity', 'product purity'] },\n  { name: 'residence_time', aliases: ['residence time', 'retention time'] },\n  { name: 'reaction_conversion', aliases: ['reaction conversion', 'conversion rate'] },\n  { name: 'catalyst_loading', aliases: ['catalyst loading', 'catalyst dose'] }\n];\n\nfor (var rpi = 0; rpi < runParams.length; rpi++) {\n  var rp = runParams[rpi];\n  var rpAliases = [rp.name.replace(/_/g, ' ')];\n  for (var ra = 0; ra < rp.aliases.length; ra++) {\n    if (rpAliases.indexOf(rp.aliases[ra]) < 0) { rpAliases.push(rp.aliases[ra]); }\n  }\n  resultsFields.push({ key: 'run_parameters.' + rp.name, source: 'results', aliases: rpAliases, category: 'run_parameters' });\n}\n\nvar metaKeys = ['run_id', 'model_id', 'created_at', 'execution_time', 'biosteam_version', 'status', 'experiment_type', 'session_id'];\nfor (var mi = 0; mi < metaKeys.length; mi++) {\n  resultsFields.push({ key: 'metadata.' + metaKeys[mi], source: 'results', aliases: [metaKeys[mi].replace(/_/g, ' ')], category: 'metadata' });\n}\n\nvar refDict = [];\nfor (var u = 0; u < userFields.length; u++) { refDict.push(userFields[u]); }\nfor (var r = 0; r < resultsFields.length; r++) { refDict.push(resultsFields[r]); }\n\nreturn [{\n  json: {\n    run_id: config.run_id,\n    min_score: config.min_score,\n    SUPABASE_URL: config.SUPABASE_URL,\n    SUPABASE_BUCKET: config.SUPABASE_BUCKET,\n    templates: templates,\n    reference_dictionary: refDict,\n    ref_dict_count: refDict.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        128
+      ],
+      "id": "afg-build-ref-dict",
+      "name": "Build Reference Dictionary"
+    },
+    {
+      "parameters": {
+        "jsCode": "var data = $input.first().json;\nvar templates = data.templates;\nvar refDict = data.reference_dictionary;\nvar MIN_SCORE = data.min_score || 0.70;\nvar MIN_ALIAS_LEN = 4;\n\nfunction levenshtein(a, b) {\n  var m = a.length, n = b.length;\n  var dp = [];\n  for (var i = 0; i <= m; i++) {\n    dp[i] = [i];\n    for (var j = 1; j <= n; j++) { dp[i][j] = 0; }\n  }\n  for (var j2 = 0; j2 <= n; j2++) { dp[0][j2] = j2; }\n  for (var i2 = 1; i2 <= m; i2++) {\n    for (var j3 = 1; j3 <= n; j3++) {\n      var cost = (a[i2-1] === b[j3-1]) ? 0 : 1;\n      dp[i2][j3] = Math.min(dp[i2-1][j3] + 1, dp[i2][j3-1] + 1, dp[i2-1][j3-1] + cost);\n    }\n  }\n  return dp[m][n];\n}\n\nfunction similarity(a, b) {\n  var maxLen = Math.max(a.length, b.length);\n  if (maxLen === 0) return 1;\n  return 1 - levenshtein(a, b) / maxLen;\n}\n\nfunction normalise(name) {\n  // Extract leaf from dot-separated hierarchical paths\n  var dotParts = name.split('.');\n  name = dotParts[dotParts.length - 1];\n  // Strip array indices [0], [1] etc.\n  name = name.replace(/\\[\\d+\\]/g, '');\n  // Strip common PDF form section prefixes\n  name = name.replace(/^(APP|AD|Agent|DPW|SA|SiteArea|Parking|Trees|Access|Materials|Auth|Dec|COS)_/i, '');\n  // Split camelCase into words\n  name = name.replace(/([a-z])([A-Z])/g, '$1 $2');\n  return name\n    .replace(/^[A-Z0-9]+-/i, '')\n    .replace(/[_-]/g, ' ')\n    .replace(/\\d+$/g, '')\n    .replace(/[^a-zA-Z0-9 ]/g, '')\n    .toLowerCase()\n    .trim();\n}\n\nfunction findBestMatch(norm, refDict, minScore) {\n  var bestScore = 0;\n  var bestEntry = null;\n  var bestAlias = '';\n  var matchType = '';\n\n  for (var ri = 0; ri < refDict.length; ri++) {\n    var ref = refDict[ri];\n    for (var ai = 0; ai < ref.aliases.length; ai++) {\n      var alias = ref.aliases[ai];\n      var score = 0;\n\n      if (norm === alias) {\n        score = 1.0;\n      } else {\n        score = similarity(norm, alias);\n      }\n\n      if (score < minScore && alias.length >= MIN_ALIAS_LEN) {\n        if (norm.indexOf(alias) >= 0 && alias.length >= norm.length * 0.5) {\n          score = Math.max(score, 0.85);\n        } else if (alias.indexOf(norm) >= 0 && norm.length >= alias.length * 0.5) {\n          score = Math.max(score, 0.82);\n        }\n      }\n\n      if (alias.length < MIN_ALIAS_LEN && score < 1.0) {\n        score = score * 0.7;\n      }\n\n      if (score > bestScore) {\n        bestScore = score;\n        bestEntry = ref;\n        bestAlias = alias;\n        if (norm === alias) { matchType = 'exact'; }\n        else if (norm.indexOf(alias) >= 0 || alias.indexOf(norm) >= 0) { matchType = 'contains'; }\n        else { matchType = 'fuzzy'; }\n      }\n    }\n  }\n\n  if (bestScore >= minScore && bestEntry) {\n    return {\n      key: bestEntry.key,\n      source: bestEntry.source,\n      score: Math.round(bestScore * 100) / 100,\n      matchType: matchType,\n      matchedAlias: bestAlias,\n      category: bestEntry.category\n    };\n  }\n  return null;\n}\n\nvar allRows = [];\nvar templateSummaries = [];\nvar totalFields = 0;\nvar totalMapped = 0;\nvar totalUnmapped = 0;\nvar totalSuggestionsFound = 0;\n\nfor (var ti = 0; ti < templates.length; ti++) {\n  var tpl = templates[ti];\n  var tplRef = tpl.template_ref || 'unknown';\n  var tplTitle = tpl.title || '';\n  var mapping = tpl.source_to_template_mapping || [];\n\n  var tplTotal = mapping.length;\n  var tplMapped = 0;\n  var tplUnmapped = 0;\n  var tplSuggested = 0;\n  var tplTopSuggestions = [];\n\n  for (var mi = 0; mi < mapping.length; mi++) {\n    var entry = mapping[mi];\n    var pdfField = entry.pdfField || '';\n    var fieldType = entry.fieldType || '';\n    var currentDataKey = entry.dataKey || '';\n    var currentSource = entry.source || '';\n    var isMapped = (currentDataKey !== '');\n\n    if (isMapped) {\n      tplMapped++;\n      allRows.push({\n        templateRef: tplRef,\n        pdfField: pdfField,\n        fieldType: fieldType,\n        currentStatus: 'mapped',\n        currentDataKey: currentDataKey,\n        currentSource: currentSource,\n        suggestedDataKey: '',\n        suggestedSource: '',\n        matchScore: '',\n        matchType: '',\n        notes: 'Already mapped to ' + currentDataKey + ' [' + currentSource + ']'\n      });\n    } else {\n      tplUnmapped++;\n      var norm = normalise(pdfField);\n      var match = null;\n      if (norm.length >= 3 && fieldType !== 'checkbox' && fieldType !== 'radio') {\n        match = findBestMatch(norm, refDict, MIN_SCORE);\n      }\n\n      var sugKey = '';\n      var sugSource = '';\n      var sugScore = '';\n      var sugType = '';\n      var notes = '';\n\n      if (match) {\n        sugKey = match.key;\n        sugSource = match.source;\n        sugScore = match.score;\n        sugType = match.matchType;\n        notes = 'Matched alias: \"' + match.matchedAlias + '\" (category: ' + match.category + ')';\n        tplSuggested++;\n        tplTopSuggestions.push({\n          pdfField: pdfField,\n          suggestedKey: match.key,\n          score: match.score,\n          matchType: match.matchType\n        });\n      } else {\n        if (fieldType === 'checkbox' || fieldType === 'radio') {\n          notes = 'Checkbox/radio — manual mapping required';\n        } else if (norm.length < 3) {\n          notes = 'Field name too short for fuzzy matching';\n        } else {\n          notes = 'No match found above threshold (' + MIN_SCORE + ')';\n        }\n      }\n\n      allRows.push({\n        templateRef: tplRef,\n        pdfField: pdfField,\n        fieldType: fieldType,\n        currentStatus: 'unmapped',\n        currentDataKey: '',\n        currentSource: '',\n        suggestedDataKey: sugKey,\n        suggestedSource: sugSource,\n        matchScore: sugScore,\n        matchType: sugType,\n        notes: notes\n      });\n    }\n  }\n\n  tplTopSuggestions.sort(function(a, b) { return b.score - a.score; });\n\n  templateSummaries.push({\n    template_ref: tplRef,\n    title: tplTitle,\n    total_fields: tplTotal,\n    mapped: tplMapped,\n    unmapped: tplUnmapped,\n    suggestions_found: tplSuggested,\n    suggestion_rate_pct: tplUnmapped > 0 ? Math.round(tplSuggested / tplUnmapped * 100) : 100,\n    top_suggestions: tplTopSuggestions.slice(0, 10)\n  });\n\n  totalFields += tplTotal;\n  totalMapped += tplMapped;\n  totalUnmapped += tplUnmapped;\n  totalSuggestionsFound += tplSuggested;\n}\n\nreturn [{\n  json: {\n    run_id: data.run_id,\n    SUPABASE_URL: data.SUPABASE_URL,\n    SUPABASE_BUCKET: data.SUPABASE_BUCKET,\n    allRows: allRows,\n    templateSummaries: templateSummaries,\n    overall: {\n      templates_analysed: templates.length,\n      total_fields: totalFields,\n      total_mapped: totalMapped,\n      total_unmapped: totalUnmapped,\n      total_suggestions_found: totalSuggestionsFound,\n      overall_suggestion_rate_pct: totalUnmapped > 0 ? Math.round(totalSuggestionsFound / totalUnmapped * 100) : 100,\n      reference_dictionary_size: refDict.length,\n      min_score_threshold: MIN_SCORE\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        128
+      ],
+      "id": "afg-analyse-gaps",
+      "name": "Analyse Gaps"
+    },
+    {
+      "parameters": {
+        "jsCode": "var data = $input.first().json;\nvar allRows = data.allRows || [];\nvar rows = [];\n\nfor (var i = 0; i < allRows.length; i++) {\n  var r = allRows[i];\n  rows.push({\n    json: {\n      'Template Ref': r.templateRef,\n      'PDF Field Name': r.pdfField,\n      'Field Type': r.fieldType,\n      'Current Status': r.currentStatus,\n      'Current Mapping': r.currentDataKey ? r.currentDataKey + ' [' + r.currentSource + ']' : '',\n      'Suggested Data Key': r.suggestedDataKey,\n      'Suggested Source': r.suggestedSource,\n      'Match Score': r.matchScore,\n      'Match Type': r.matchType,\n      'Notes': r.notes\n    }\n  });\n}\n\nif (rows.length === 0) {\n  rows.push({\n    json: {\n      'Template Ref': '(no templates found)',\n      'PDF Field Name': '',\n      'Field Type': '',\n      'Current Status': '',\n      'Current Mapping': '',\n      'Suggested Data Key': '',\n      'Suggested Source': '',\n      'Match Score': '',\n      'Match Type': '',\n      'Notes': ''\n    }\n  });\n}\n\nreturn rows;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        0
+      ],
+      "id": "afg-format-excel",
+      "name": "Format Excel Rows"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {
+          "fileName": "={{ $('Analyse Gaps').first().json.run_id }}_gap_report.xlsx"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        1520,
+        0
+      ],
+      "id": "afg-write-excel",
+      "name": "Write Gap Report Excel"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Analyse Gaps').first().json.SUPABASE_URL }}/storage/v1/object/{{ $('Analyse Gaps').first().json.SUPABASE_BUCKET }}/gap-reports/{{ $('Analyse Gaps').first().json.run_id }}_gap_report.xlsx",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-upsert",
+              "value": "true"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1760,
+        0
+      ],
+      "id": "afg-upload-excel",
+      "name": "Upload Gap Report Excel",
+      "credentials": {
+        "supabaseApi": {
+          "id": "BYITrEXmevQnyhbp",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var data = $('Analyse Gaps').first().json;\n\nreturn [{\n  json: {\n    jsonSummary: {\n      report_type: 'gap_analysis',\n      version: '0.1',\n      run_id: data.run_id,\n      generated_at: new Date().toISOString(),\n      overall: data.overall,\n      templates: data.templateSummaries\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        0
+      ],
+      "id": "afg-json-summary",
+      "name": "Build JSON Summary"
+    },
+    {
+      "parameters": {
+        "jsCode": "var analysis = $('Analyse Gaps').first().json;\nvar jsonSummary = $('Build JSON Summary').first().json.jsonSummary;\nvar excelBinary = $('Write Gap Report Excel').first().binary;\n\nvar overall = analysis.overall;\nvar msg = 'Gap analysis complete. '\n  + overall.templates_analysed + ' template(s) analysed, '\n  + overall.total_fields + ' total fields ('\n  + overall.total_mapped + ' mapped, '\n  + overall.total_unmapped + ' unmapped). '\n  + overall.total_suggestions_found + ' suggestions found ('\n  + overall.overall_suggestion_rate_pct + '% suggestion rate). '\n  + 'Reference dictionary: ' + overall.reference_dictionary_size + ' keys. '\n  + 'Excel report uploaded to gap-reports/' + analysis.run_id + '_gap_report.xlsx';\n\nreturn [{\n  json: {\n    status: 'success',\n    message: msg,\n    run_id: analysis.run_id,\n    overall: overall,\n    templates: analysis.templateSummaries,\n    json_summary: jsonSummary,\n    excel_path: 'gap-reports/' + analysis.run_id + '_gap_report.xlsx'\n  },\n  binary: excelBinary\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        128
+      ],
+      "id": "afg-return-summary",
+      "name": "Return Summary"
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Default Params",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Webhook Params",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Default Params": {
+      "main": [
+        [
+          {
+            "node": "Fetch Templates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Webhook Params": {
+      "main": [
+        [
+          {
+            "node": "Fetch Templates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Templates": {
+      "main": [
+        [
+          {
+            "node": "Fetch System Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch System Config": {
+      "main": [
+        [
+          {
+            "node": "Build Reference Dictionary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Reference Dictionary": {
+      "main": [
+        [
+          {
+            "node": "Analyse Gaps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyse Gaps": {
+      "main": [
+        [
+          {
+            "node": "Format Excel Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Excel Rows": {
+      "main": [
+        [
+          {
+            "node": "Write Gap Report Excel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Gap Report Excel": {
+      "main": [
+        [
+          {
+            "node": "Upload Gap Report Excel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Gap Report Excel": {
+      "main": [
+        [
+          {
+            "node": "Build JSON Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build JSON Summary": {
+      "main": [
+        [
+          {
+            "node": "Return Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "v0.1-2026-02-21",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "0821db230f4e2311b0b89e42a29af9f42d365450a0a940495f8bb726d5a5a538"
+  },
+  "id": "AnalyseFormGaps01",
+  "tags": []
+}

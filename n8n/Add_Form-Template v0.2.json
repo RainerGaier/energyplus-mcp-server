@@ -1,0 +1,279 @@
+{
+  "name": "Add Form Template v0.2",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-1200, 0],
+      "id": "ft-manual-trigger",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "add-form-template",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1200, 240],
+      "id": "ft-webhook-trigger",
+      "name": "Webhook Trigger",
+      "webhookId": "add-form-template"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"run_id\": \"AddTemplate-{{ $now.format('yyyy-MM-dd_HH-mm') }}\",\n  \"title\": \"UKPN G98 Application\",\n  \"description\": \"Application for connection of small-scale embedded generators (G98)\",\n  \"template_ref\": \"\",\n  \"source_site\": \"\",\n  \"version\": \"1.0\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-960, 0],
+      "id": "ft-default-params",
+      "name": "Default Params"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"run_id\": \"{{ $json.body.run_id || 'AddTemplate-' + $now.format('yyyy-MM-dd_HH-mm') }}\",\n  \"title\": \"{{ $json.body.title || '' }}\",\n  \"description\": \"{{ $json.body.description || '' }}\",\n  \"template_ref\": \"{{ $json.body.template_ref || '' }}\",\n  \"source_site\": \"{{ $json.body.source_site || '' }}\",\n  \"version\": \"{{ $json.body.version || '1.0' }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-960, 240],
+      "id": "ft-extract-webhook",
+      "name": "Extract Webhook Params"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst params = item.json;\n\n// Validate required fields\nif (!params.title) {\n  throw new Error('Missing required field: title');\n}\nif (!params.description) {\n  throw new Error('Missing required field: description');\n}\n\n// Generate template_ref from title if not provided\nlet template_ref = params.template_ref;\nif (!template_ref) {\n  template_ref = params.title\n    .toLowerCase()\n    .replace(/[^a-z0-9\\s-]/g, '')\n    .replace(/\\s+/g, '-')\n    .replace(/-+/g, '-')\n    .substring(0, 50);\n}\n\n// Sanitise the original filename for safe URL usage\nconst origName = item.binary?.data?.fileName || 'form.pdf';\nconst ext = origName.substring(origName.lastIndexOf('.'));\nconst safeName = origName\n  .substring(0, origName.lastIndexOf('.'))\n  .toLowerCase()\n  .replace(/[^a-z0-9]/g, '-')\n  .replace(/-+/g, '-')\n  .replace(/^-|-$/g, '')\n  .substring(0, 60) + ext;\n\n// Return both JSON and binary so the PDF passes through\nreturn [{\n  json: {\n    run_id: params.run_id,\n    title: params.title,\n    description: params.description,\n    template_ref: template_ref,\n    source_site: params.source_site || '',\n    version: params.version || '1.0',\n    safe_fileName: safeName,\n    SUPABASE_URL: 'https://egrzvwnjrtpwwmqzimff.supabase.co',\n    SUPABASE_BUCKET: 'panicleDevelop_1',\n    SUPABASE_KEY: 'PASTE_YOUR_SERVICE_ROLE_KEY_HERE'\n  },\n  binary: item.binary\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-640, 120],
+      "id": "ft-merge-config",
+      "name": "Validate & Merge Config"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Validate & Merge Config').item.json.SUPABASE_URL }}/storage/v1/object/{{ $('Validate & Merge Config').item.json.SUPABASE_BUCKET }}/PDF-templates/{{ $('Validate & Merge Config').item.json.template_ref }}/{{ $('Validate & Merge Config').item.json.safe_fileName }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-upsert",
+              "value": "true"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-400, 120],
+      "id": "ft-upload-pdf",
+      "name": "Upload PDF to Bucket",
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_ME",
+          "name": "Supabase API"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Uploads the PDF binary to Supabase Storage.\nUses Supabase credential for auth.\nPath: PDF-templates/{template_ref}/{filename}"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the storage path and pass binary through for Discover Fields\nconst config = $('Validate & Merge Config').item.json;\nconst url_link = `PDF-templates/${config.template_ref}/${config.safe_fileName}`;\n\nreturn [{\n  json: {\n    ...config,\n    url_link: url_link\n  },\n  binary: $('Validate & Merge Config').item.binary\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-160, 120],
+      "id": "ft-build-url",
+      "name": "Build Storage URL"
+    },
+    {
+      "parameters": {
+        "operation": "discoverFields",
+        "binaryPropertyName": "data"
+      },
+      "type": "n8n-nodes-pdf-form-filler.pdfFormFiller",
+      "typeVersion": 1,
+      "position": [80, 120],
+      "id": "ft-discover-fields",
+      "name": "Discover Fields"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "field-check",
+              "leftValue": "={{ $json.fieldCount }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [280, 120],
+      "id": "ft-check-fields",
+      "name": "Has Fields?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const config = $('Build Storage URL').item.json;\nconst msg = 'PDF ' + config.safe_fileName + ' has no fillable AcroForm fields. This is likely an XFA-only form. The file was uploaded to storage but no template record was created.';\n\nreturn [{\n  json: {\n    status: 'skipped',\n    message: msg,\n    template_ref: config.template_ref,\n    title: config.title,\n    url_link: config.url_link,\n    field_count: 0,\n    hint: 'XFA forms use XML Forms Architecture that pdf-lib cannot read. Convert to AcroForm format or use a different PDF.'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 300],
+      "id": "ft-no-fields",
+      "name": "No Fields Found"
+    },
+    {
+      "parameters": {
+        "jsCode": "var config = $('Build Storage URL').item.json;\nvar discoverResult = $('Has Fields?').item.json;\n\n// ── Known data-source fields with aliases ──\nvar userFields = [\n  { key: 'first_name', source: 'users', aliases: ['first name', 'forename', 'given name', 'firstname'] },\n  { key: 'last_name', source: 'users', aliases: ['last name', 'surname', 'family name', 'lastname'] },\n  { key: 'position', source: 'users', aliases: ['position', 'job title', 'role'] },\n  { key: 'phone_number', source: 'users', aliases: ['phone number', 'telephone number', 'telephone', 'tel number', 'landline', 'contact number'] },\n  { key: 'email', source: 'users', aliases: ['email', 'email address', 'e-mail', 'e mail'] },\n  { key: 'company_name', source: 'users', aliases: ['company', 'company name', 'organisation', 'organization', 'business name'] },\n  { key: 'company_number', source: 'users', aliases: ['company number', 'company no', 'registration number', 'company reg'] },\n  { key: 'company_address', source: 'users', aliases: ['company address', 'business address', 'registered address'] },\n  { key: 'website', source: 'users', aliases: ['website', 'web site', 'url'] },\n  { key: 'mobile_number', source: 'user_details', aliases: ['mobile', 'mobile number', 'mobile no', 'cell phone', 'mob number'] },\n  { key: 'postcode', source: 'user_details', aliases: ['postcode', 'post code', 'zip code'] },\n  { key: 'title', source: 'user_details', aliases: ['title', 'salutation', 'prefix'] }\n];\n\nvar MIN_FIELD_LEN = 3;\nvar MIN_SCORE = 0.78;\nvar MIN_ALIAS_LEN = 4;\n\n// ── Levenshtein distance ──\nfunction levenshtein(a, b) {\n  var m = a.length, n = b.length;\n  var dp = [];\n  for (var i = 0; i <= m; i++) {\n    dp[i] = [i];\n    for (var j = 1; j <= n; j++) {\n      dp[i][j] = 0;\n    }\n  }\n  for (var j2 = 0; j2 <= n; j2++) { dp[0][j2] = j2; }\n  for (var i2 = 1; i2 <= m; i2++) {\n    for (var j3 = 1; j3 <= n; j3++) {\n      var cost = (a[i2-1] === b[j3-1]) ? 0 : 1;\n      dp[i2][j3] = Math.min(dp[i2-1][j3] + 1, dp[i2][j3-1] + 1, dp[i2-1][j3-1] + cost);\n    }\n  }\n  return dp[m][n];\n}\n\nfunction similarity(a, b) {\n  var maxLen = Math.max(a.length, b.length);\n  if (maxLen === 0) return 1;\n  return 1 - levenshtein(a, b) / maxLen;\n}\n\n// ── Normalise PDF field name ──\nfunction normalise(name) {\n  return name\n    .replace(/^[A-Z0-9]+-/i, '')\n    .replace(/[_-]/g, ' ')\n    .replace(/\\d+$/g, '')\n    .replace(/[^a-zA-Z0-9 ]/g, '')\n    .toLowerCase()\n    .trim();\n}\n\n// ── Extract section prefix (e.g. A1, B2, Section1) ──\nfunction getSection(name) {\n  var m = name.match(/^([A-Z]\\d+)-/i);\n  return m ? m[1].toUpperCase() : '_root';\n}\n\n// ── Build initial mapping ──\nvar initialMapping = discoverResult.fields.map(function(field) {\n  return {\n    pdfField: field.name,\n    fieldType: field.type,\n    dataKey: '',\n    source: '',\n    confidence: '',\n    score: 0,\n    notes: ''\n  };\n});\n\n// ── Fuzzy matching ──\nvar autoMapped = 0;\nvar sectionKeyUsed = {};\n\nfor (var idx = 0; idx < initialMapping.length; idx++) {\n  var entry = initialMapping[idx];\n  if (entry.fieldType === 'checkbox' || entry.fieldType === 'radio') continue;\n\n  var norm = normalise(entry.pdfField);\n  if (norm.length < MIN_FIELD_LEN) continue;\n\n  var section = getSection(entry.pdfField);\n  var bestScore = 0;\n  var bestField = null;\n\n  for (var fi = 0; fi < userFields.length; fi++) {\n    var uf = userFields[fi];\n    for (var ai = 0; ai < uf.aliases.length; ai++) {\n      var alias = uf.aliases[ai];\n      var score = 0;\n\n      if (norm === alias) {\n        score = 1.0;\n      } else {\n        score = similarity(norm, alias);\n      }\n\n      if (score < MIN_SCORE && alias.length >= MIN_ALIAS_LEN) {\n        if (norm.indexOf(alias) >= 0 && alias.length >= norm.length * 0.5) {\n          score = Math.max(score, 0.85);\n        } else if (alias.indexOf(norm) >= 0 && norm.length >= alias.length * 0.5) {\n          score = Math.max(score, 0.82);\n        }\n      }\n\n      if (alias.length < MIN_ALIAS_LEN && score < 1.0) {\n        score = score * 0.7;\n      }\n\n      if (score > bestScore) {\n        bestScore = score;\n        bestField = uf;\n      }\n    }\n  }\n\n  if (bestScore >= MIN_SCORE && bestField) {\n    var sectionKey = section + ':' + bestField.key;\n    if (!sectionKeyUsed[sectionKey]) {\n      sectionKeyUsed[sectionKey] = true;\n      entry.dataKey = bestField.key;\n      entry.source = bestField.source;\n      entry.score = Math.round(bestScore * 100) / 100;\n      if (bestScore >= 0.95) {\n        entry.confidence = 'high';\n      } else if (bestScore >= 0.85) {\n        entry.confidence = 'medium';\n      } else {\n        entry.confidence = 'low';\n      }\n      entry.notes = 'auto-mapped (fuzzy)';\n      autoMapped++;\n    }\n  }\n}\n\nreturn [{\n  json: {\n    template_ref: config.template_ref,\n    title: config.title,\n    description: config.description,\n    url_link: config.url_link,\n    source_site: config.source_site,\n    version: config.version,\n    input_field_list: {\n      fields: discoverResult.fields,\n      fieldCount: discoverResult.fieldCount\n    },\n    source_to_template_mapping: initialMapping,\n    auto_mapped_count: autoMapped,\n    unmapped_count: initialMapping.length - autoMapped\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 0],
+      "id": "ft-build-mapping",
+      "name": "Build Initial Mapping"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Validate & Merge Config').item.json.SUPABASE_URL }}/rest/v1/pdf_ff_templates?on_conflict=template_ref",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation,resolution=merge-duplicates"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ template_ref: $json.template_ref, title: $json.title, description: $json.description, url_link: $json.url_link, source_site: $json.source_site, input_field_list: $json.input_field_list, source_to_template_mapping: $json.source_to_template_mapping, version: $json.version }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [760, 0],
+      "id": "ft-insert-template",
+      "name": "Insert Template Record",
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_ME",
+          "name": "Supabase API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "var mapping = $('Build Initial Mapping').item.json;\nvar dbRecord = $input.first().json;\n\nvar highConf = 0, medConf = 0, lowConf = 0;\nvar mapped = mapping.source_to_template_mapping || [];\nfor (var i = 0; i < mapped.length; i++) {\n  if (mapped[i].confidence === 'high') highConf++;\n  else if (mapped[i].confidence === 'medium') medConf++;\n  else if (mapped[i].confidence === 'low') lowConf++;\n}\n\nvar msg = 'Template ' + mapping.template_ref + ' catalogued successfully. ' + mapping.auto_mapped_count + ' fields auto-mapped (' + highConf + ' high, ' + medConf + ' medium, ' + lowConf + ' low confidence), ' + mapping.unmapped_count + ' fields need manual mapping.';\n\nreturn [{\n  json: {\n    status: 'success',\n    message: msg,\n    template_id: dbRecord.id,\n    template_ref: mapping.template_ref,\n    title: mapping.title,\n    field_count: mapping.input_field_list.fieldCount,\n    auto_mapped: mapping.auto_mapped_count,\n    confidence_breakdown: { high: highConf, medium: medConf, low: lowConf },\n    needs_mapping: mapping.unmapped_count,\n    url_link: mapping.url_link,\n    next_step: 'Review source_to_template_mapping in pdf_ff_templates table. Check medium/low confidence mappings and fill in unmapped fields (dataKey = empty).'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 0],
+      "id": "ft-summary",
+      "name": "Return Summary"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [{ "node": "Default Params", "type": "main", "index": 0 }]
+      ]
+    },
+    "Webhook Trigger": {
+      "main": [
+        [{ "node": "Extract Webhook Params", "type": "main", "index": 0 }]
+      ]
+    },
+    "Default Params": {
+      "main": [
+        [{ "node": "Validate & Merge Config", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Webhook Params": {
+      "main": [
+        [{ "node": "Validate & Merge Config", "type": "main", "index": 0 }]
+      ]
+    },
+    "Validate & Merge Config": {
+      "main": [
+        [{ "node": "Upload PDF to Bucket", "type": "main", "index": 0 }]
+      ]
+    },
+    "Upload PDF to Bucket": {
+      "main": [
+        [{ "node": "Build Storage URL", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Storage URL": {
+      "main": [
+        [{ "node": "Discover Fields", "type": "main", "index": 0 }]
+      ]
+    },
+    "Discover Fields": {
+      "main": [
+        [{ "node": "Has Fields?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has Fields?": {
+      "main": [
+        [{ "node": "Build Initial Mapping", "type": "main", "index": 0 }],
+        [{ "node": "No Fields Found", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Initial Mapping": {
+      "main": [
+        [{ "node": "Insert Template Record", "type": "main", "index": 0 }]
+      ]
+    },
+    "Insert Template Record": {
+      "main": [
+        [{ "node": "Return Summary", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "v0.1-2026-02-16",
+  "meta": {
+    "instanceId": "1a31eed7b82cb7f448f2abc5a538a777a1f9a344ccc5df5f3741cf94e7885baa"
+  },
+  "tags": []
+}
